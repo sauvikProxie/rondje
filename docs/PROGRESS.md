@@ -119,7 +119,30 @@ During development, a deliberate mutation (score `+1` changed to `+2` in
 `flip_card`) made 5 DB tests fail, which confirmed that the DB suite detects
 rule regressions. The schema was then restored.
 
-## Not verified (no Supabase project / no Docker)
+## Live verification against Supabase (2026-10-17, after credentials were added)
+
+Project checks (read-only probes): schema functions present; seed present
+(82 pairs each for image_pairs / word_image / de_het, 20 opposites; the
+project has two more nouns than `seed.sql`); `game_layout` denied to the
+publishable key; anonymous sign-ins enabled.
+
+| Command | Result |
+|---|---|
+| `npx playwright test --project=multiplayer` (run 1) | failed at player join: text typed before hydration was reset (app bug, fixed) |
+| (run 2) | failed on the final flip: test waited for a card that the results screen had replaced (test bug, fixed) |
+| (runs 3 and 4) | **passed** (1.0 min): host sign-in, session creation, 3 players in separate contexts, identical boards, match keeps turn, miss passes turn, scoreboard sync, board clear, same results everywhere, results survive refresh |
+| Realtime probe (throwaway users, cleaned up) | member subscribes to private `session:<id>` and receives `{id, revision, session_id}` ~0.4 s after a change; non-member gets `Unauthorized`; **a public channel could still be subscribed, so "Allow public access" is still enabled in the dashboard** |
+| `npm test` / `npx playwright test` | 139 passed / 56 passed |
+
+Fix made: the join nickname, login email and landing join-code inputs now
+use `bind:value`, which Svelte preserves across hydration; a plain `value=`
+attribute was reset, silently emptying a `required` field.
+
+Still not verified: genuinely simultaneous requests (row locks exist but no
+parallel stress test was run); host sign-up flow with email confirmation
+(the test host is created through the admin API).
+
+## Not verified before credentials were available (historical)
 
 - Live Supabase Auth: host email/password sign-in and sign-up, anonymous
   sign-in, cookie handling through `@supabase/ssr`.

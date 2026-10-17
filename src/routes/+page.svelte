@@ -6,6 +6,11 @@
 	let { data, form } = $props();
 
 	let submitting = $state(false);
+	// bind:value (not value=) so text typed before hydration is kept.
+	let code = $state('');
+	$effect.pre(() => {
+		if (form?.code) code = form.code;
+	});
 </script>
 
 <svelte:head>
@@ -52,7 +57,7 @@
 					id="code"
 					name="code"
 					class="field-input text-center font-mono text-2xl font-extrabold tracking-[0.3em] uppercase"
-					value={form?.code ?? ''}
+					bind:value={code}
 					maxlength="8"
 					autocomplete="off"
 					autocapitalize="characters"

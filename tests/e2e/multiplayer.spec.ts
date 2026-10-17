@@ -125,9 +125,16 @@ test('host and three players play a complete game', async ({ browser }) => {
 		expect((await admin.game(sessionId)).active_player_id).toBe(secondId);
 
 		// 12. One player clears their board and the game completes.
-		for (const [a, b] of pairs) {
+		for (const [i, [a, b]] of pairs.entries()) {
 			await flip(second, a);
-			await flip(second, b);
+			if (i < pairs.length - 1) {
+				await flip(second, b);
+			} else {
+				// The final match ends the game: the board is replaced by the results screen.
+				const card = second.locator(`[data-position="${b}"]`);
+				await expect(card).toHaveAttribute('aria-disabled', 'false', { timeout: UI_TIMEOUT });
+				await card.click();
+			}
 		}
 
 		// 13. All participants see the same final results.

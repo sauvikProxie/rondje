@@ -7,9 +7,12 @@
 
 	let mode = $state<'signin' | 'signup'>('signin');
 	let submitting = $state(false);
+	// bind:value (not value=) so text typed before hydration is kept.
+	let email = $state('');
 
 	$effect.pre(() => {
 		if (form?.mode) mode = form.mode as 'signin' | 'signup';
+		if (form?.email) email = form.email;
 	});
 
 	const errors = $derived<Record<string, string>>((form && 'errors' in form ? form.errors : undefined) ?? {});
@@ -86,7 +89,7 @@
 					type="email"
 					autocomplete="email"
 					required
-					value={form?.email ?? ''}
+					bind:value={email}
 					aria-invalid={errors.email ? 'true' : undefined}
 					aria-describedby={errors.email ? 'email-error' : undefined}
 				/>

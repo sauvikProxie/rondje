@@ -14,7 +14,10 @@
 
 	let avatar = $state<string>(AVATARS[0]);
 	let level = $state<string>('beginner');
+	// bind:value (not value=) so text typed before hydration is kept.
+	let nickname = $state('');
 	$effect.pre(() => {
+		if (values?.nickname !== undefined) nickname = values.nickname;
 		if (values?.avatar) avatar = values.avatar;
 		if (values?.level) level = values.level;
 	});
@@ -95,7 +98,7 @@
 							maxlength={NICKNAME_MAX_LENGTH * 2}
 							autocomplete="nickname"
 							required
-							value={values?.nickname ?? ''}
+							bind:value={nickname}
 							aria-invalid={errors.nickname ? 'true' : undefined}
 							aria-describedby="nickname-hint{errors.nickname ? ' nickname-error' : ''}"
 						/>
