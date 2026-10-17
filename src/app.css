@@ -1,0 +1,92 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/nunito';
+
+@theme {
+	--font-sans: 'Nunito Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+	/* Rondje palette (spec 13.2) */
+	--color-teal: #249d8f;
+	--color-teal-deep: #1b7a6f;
+	--color-saffron: #e9c46a;
+	--color-coral: #e76f51;
+	--color-cream: #fdf0d5;
+	--color-ink: #123f3a;
+	--color-surface: #ffffff;
+
+	/* Derived tints for text/feedback with adequate contrast */
+	--color-coral-deep: #a63d25;
+	--color-teal-soft: #d8efeb;
+	--color-saffron-soft: #f8ecc9;
+	--color-coral-soft: #fbe2da;
+	--color-ink-soft: #4a6b67;
+}
+
+@layer base {
+	html {
+		-webkit-text-size-adjust: 100%;
+		text-size-adjust: 100%;
+	}
+
+	body {
+		@apply bg-cream font-sans text-ink antialiased;
+		min-height: 100dvh;
+		overflow-x: hidden;
+	}
+
+	:focus-visible {
+		outline: 3px solid var(--color-teal-deep);
+		outline-offset: 2px;
+	}
+
+	/* Mobile form fields: >= 16px so iOS does not zoom on focus. */
+	input,
+	select,
+	textarea {
+		font-size: max(16px, 1rem);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		*,
+		*::before,
+		*::after {
+			animation-duration: 0.01ms !important;
+			animation-iteration-count: 1 !important;
+			transition-duration: 0.01ms !important;
+			scroll-behavior: auto !important;
+		}
+	}
+}
+
+@utility btn {
+	@apply inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-2xl px-5 py-3 text-base font-bold transition-colors duration-150 select-none disabled:cursor-not-allowed disabled:opacity-55;
+}
+@utility btn-primary {
+	@apply btn bg-teal-deep text-white hover:bg-ink active:bg-ink disabled:hover:bg-teal-deep;
+}
+@utility btn-secondary {
+	@apply btn bg-saffron text-ink hover:bg-[#dfb44f] active:bg-[#d4a83f] disabled:hover:bg-saffron;
+}
+@utility btn-ghost {
+	@apply btn border-2 border-ink/15 bg-surface text-ink hover:border-teal-deep hover:bg-teal-soft;
+}
+@utility btn-danger {
+	@apply btn bg-coral-deep text-white hover:bg-[#8a3018] disabled:hover:bg-coral-deep;
+}
+@utility card-surface {
+	@apply rounded-3xl bg-surface shadow-[0_1px_0_rgba(18,63,58,0.08),0_8px_24px_-12px_rgba(18,63,58,0.18)];
+}
+@utility field-label {
+	@apply mb-1.5 block text-sm font-bold text-ink;
+}
+@utility field-input {
+	@apply block min-h-12 w-full rounded-2xl border-2 border-ink/15 bg-surface px-4 py-2.5 text-ink placeholder:text-ink-soft/70 focus:border-teal-deep focus:outline-none aria-[invalid=true]:border-coral-deep;
+}
+@utility field-error {
+	@apply mt-1.5 text-sm font-semibold text-coral-deep;
+}
+@utility pill {
+	@apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold;
+}
+@utility safe-bottom {
+	padding-bottom: env(safe-area-inset-bottom);
+}
