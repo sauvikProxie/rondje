@@ -1444,3 +1444,43 @@ configuration required.
 
 The final implementation must provide a working, testable foundation for
 Rondje rather than a collection of disconnected UI mockups.
+
+---
+
+# 22. Implementation Notes (added during the rebuild)
+
+These notes record how the implementation resolved details this
+specification leaves open. They clarify; they do not change any rule above.
+
+1.  **Removed players and winning.** Removed players keep their score in
+    the results (marked as removed) but are not ranked and cannot win.
+    When the host ends the game or too few players remain, the winners are
+    the non-removed players with the highest score (ties possible).
+2.  **Deadline after a lazy resolution.** Each resolution performs at most
+    one transition (reveal end *or* turn timeout). The next player's
+    `turn_until` is set to the database time of the resolution plus the
+    turn limit, so a late resolution gives the next player a full turn
+    instead of chaining several timeouts.
+3.  **Stale revisions.** A flip must carry the current revision (after any
+    lazy resolution). Otherwise it is rejected as `stale_state` without
+    changing state, and the response includes the current view.
+4.  **Replayed action IDs** are rejected as `duplicate_action` with the
+    current view. They never change state.
+5.  **Own-board check.** A flip request also names the board owner, so the
+    server can explicitly reject flips on another player's board.
+6.  **Single revision counter.** `game_sessions.revision` covers lobby and
+    game changes, so clients have one monotonic version to compare.
+7.  **Host as player.** A host cannot join their own session as a player.
+    Joining another host's session with a non-anonymous account is allowed.
+8.  **Removal in the lobby** is permanent for that identity; the same
+    identity cannot rejoin the session.
+9.  **Ending.** "End game" is available only while a game is in progress;
+    lobby sessions are not cancelled (no cancel feature in scope).
+10. **Score equals pairs matched.** Each match awards exactly one point, so
+    a player's score equals the pairs matched on their board.
+11. **Realtime publishing.** Notifications (`{session_id, revision}`) are
+    sent from inside the same database transaction with `realtime.send()`
+    on the private topic `session:<id>`. Clients may track presence on that
+    topic but may not broadcast.
+12. **Secret key.** The application never needs the Supabase secret key.
+    It is used only by test tooling under `tests/`.
