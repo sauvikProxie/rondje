@@ -1440,6 +1440,39 @@ begin
 end;
 $$;
 
+-- Host: permanently delete a session with everything that belongs to it
+-- (players, game, layout, boards, attempts). Allowed in any status. Members are
+-- notified first so their open pages refetch and find the session gone.
+create or replace function public.delete_session(p_session_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+	v_uid uuid := auth.uid();
+	v_session public.game_sessions%rowtype;
+begin
+	if v_uid is null then
+		return private.fail('not_authenticated');
+	end if;
+
+	select * into v_session from public.game_sessions where id = p_session_id for update;
+	if not found then
+		return private.fail('session_not_found');
+	end if;
+	if v_session.host_id <> v_uid then
+		return private.fail('not_host');
+	end if;
+
+	perform private.bump_revision(p_session_id);
+	-- Cascades to players, games, game_layout, board_cells, game_attempts, processed_actions.
+	delete from public.game_sessions where id = p_session_id;
+
+	return jsonb_build_object('ok', true, 'error', null, 'view', null);
+end;
+$$;
+
 -- -----------------------------------------------------------------------------
 -- Function privileges
 -- -----------------------------------------------------------------------------
@@ -1459,6 +1492,7 @@ revoke execute on function public.start_game(uuid) from public, anon;
 revoke execute on function public.flip_card(uuid, uuid, integer, uuid, bigint) from public, anon;
 revoke execute on function public.end_game(uuid) from public, anon;
 revoke execute on function public.remove_player(uuid, uuid) from public, anon;
+revoke execute on function public.delete_session(uuid) from public, anon;
 
 grant execute on function public.lookup_session(text) to anon, authenticated;
 grant execute on function public.create_session(text, text, integer, timestamptz) to authenticated;
@@ -1468,6 +1502,7 @@ grant execute on function public.start_game(uuid) to authenticated;
 grant execute on function public.flip_card(uuid, uuid, integer, uuid, bigint) to authenticated;
 grant execute on function public.end_game(uuid) to authenticated;
 grant execute on function public.remove_player(uuid, uuid) to authenticated;
+grant execute on function public.delete_session(uuid) to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Realtime authorisation (private Broadcast + Presence, spec 11.3)

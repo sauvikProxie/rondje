@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { SessionSync } from '$lib/client/session-sync.svelte';
 	import GameTable from '$lib/components/game/GameTable.svelte';
 	import ResultsView from '$lib/components/game/ResultsView.svelte';
@@ -28,6 +29,11 @@
 	const canStart = $derived(status === 'lobby' && activePlayers.length >= 2);
 	let removing = $state<string | null>(null);
 
+	async function deleteSession() {
+		const result = await sync.act('delete');
+		if (result.ok || sync.fatal) await goto('/dashboard', { invalidateAll: true });
+	}
+
 	async function remove(player: ViewPlayer) {
 		removing = player.id;
 		await sync.act(`players/${player.id}/remove`);
@@ -54,11 +60,22 @@
 				{#if status !== 'completed'}<ConnectionPill state={sync.connection} />{/if}
 			</div>
 		</div>
-		{#if status === 'in_progress'}
-			<ConfirmButton class="btn-danger" confirmLabel="Confirm: end game now" disabled={sync.busy} onconfirm={() => sync.act('end')}>
-				<span aria-hidden="true">⏹</span> End game
+		<div class="flex flex-wrap gap-2">
+			{#if status === 'in_progress'}
+				<ConfirmButton class="btn-danger" confirmLabel="Confirm: end game now" disabled={sync.busy} onconfirm={() => sync.act('end')}>
+					<span aria-hidden="true">⏹</span> End game
+				</ConfirmButton>
+			{/if}
+			<ConfirmButton
+				class="btn-ghost"
+				confirmLabel="Confirm: delete session"
+				ariaLabel="Delete this session"
+				disabled={sync.busy}
+				onconfirm={deleteSession}
+			>
+				<span aria-hidden="true">🗑</span> Delete session
 			</ConfirmButton>
-		{/if}
+		</div>
 	</header>
 
 	{#if sync.fatal}

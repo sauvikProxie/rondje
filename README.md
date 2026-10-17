@@ -58,7 +58,7 @@ for database and security tests.
 | `/session/[code]` | Player view: lobby, then game, then results |
 | `/api/sessions/[id]/state` | `GET` the caller's authorised view (resolves overdue deadlines) |
 | `/api/sessions/[id]/flip` | `POST {boardPlayerId, position, actionId, revision}` |
-| `/api/sessions/[id]/start`, `/end` | Host actions |
+| `/api/sessions/[id]/start`, `/end`, `/delete` | Host actions (`/delete` permanently removes the session and all its data) |
 | `/api/sessions/[id]/players/[playerId]/remove` | Host removes a participant |
 
 ## Prerequisites

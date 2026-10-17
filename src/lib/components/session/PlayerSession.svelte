@@ -26,7 +26,15 @@
 </svelte:head>
 
 {#if sync.fatal}
-	<RemovedNotice sessionName={view.session.name} message={sync.fatal.message} />
+	{#if sync.fatal.code === 'session_not_found'}
+		<RemovedNotice
+			sessionName={view.session.name}
+			title="This session was deleted"
+			message="The host deleted this session, so the game is no longer available."
+		/>
+	{:else}
+		<RemovedNotice sessionName={view.session.name} message={sync.fatal.message} />
+	{/if}
 {:else}
 	<div class="mx-auto flex min-h-dvh max-w-6xl flex-col px-3 sm:px-6">
 		<header class="flex items-center justify-between gap-3 py-3">

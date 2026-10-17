@@ -421,6 +421,10 @@ export type Database = {
 				Args: { p_session_id: string };
 				Returns: Json;
 			};
+			delete_session: {
+				Args: { p_session_id: string };
+				Returns: Json;
+			};
 			remove_player: {
 				Args: { p_session_id: string; p_player_id: string };
 				Returns: Json;

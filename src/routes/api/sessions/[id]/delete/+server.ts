@@ -1,0 +1,11 @@
+import { rpc } from '$lib/server/database/rpc';
+import { apiResult } from '$lib/server/http';
+import { sessionRequest } from '$lib/server/sessions/api-guard';
+import type { RequestHandler } from './$types';
+
+/** Host: permanently delete the session and all its data. */
+export const POST: RequestHandler = async (event) => {
+	const req = sessionRequest(event);
+	if (!req.ok) return req.response;
+	return apiResult(await rpc.deleteSession(req.supabase, req.sessionId));
+};

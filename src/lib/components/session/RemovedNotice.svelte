@@ -2,7 +2,7 @@
 	import Alert from '$lib/components/shared/Alert.svelte';
 	import Logo from '$lib/components/shared/Logo.svelte';
 
-	let { sessionName, message }: { sessionName: string; message?: string } = $props();
+	let { sessionName, message, title = 'You can no longer take part' }: { sessionName: string; message?: string; title?: string } = $props();
 </script>
 
 <svelte:head>
@@ -13,7 +13,7 @@
 	<header class="mb-6"><Logo /></header>
 	<main id="main" class="card-surface p-6">
 		<h1 class="mb-4 text-2xl font-black break-words">{sessionName}</h1>
-		<Alert title="You can no longer take part">
+		<Alert {title}>
 			{message ?? 'The host has removed you from this session, so you can no longer play or see the game.'}
 		</Alert>
 		<a href="/" class="btn-primary mt-6 w-full">Back to the start page</a>

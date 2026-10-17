@@ -91,6 +91,9 @@ export const rpc = {
 	endGame: (supabase: Client, sessionId: string) =>
 		call<ActionResult>('end_game', supabase.rpc('end_game', { p_session_id: sessionId })),
 
+	deleteSession: (supabase: Client, sessionId: string) =>
+		call<ActionResult>('delete_session', supabase.rpc('delete_session', { p_session_id: sessionId })),
+
 	removePlayer: (supabase: Client, sessionId: string, playerId: string) =>
 		call<ActionResult>(
 			'remove_player',
