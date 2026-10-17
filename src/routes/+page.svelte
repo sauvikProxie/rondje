@@ -23,7 +23,7 @@
 	<main id="main" class="flex-1 pb-12">
 		<section class="grid items-center gap-8 pt-6 md:grid-cols-[1.1fr_1fr] md:pt-14">
 			<div>
-				<p class="pill mb-4 bg-saffron-soft text-ink">🇳🇱 Dutch vocabulary, played together</p>
+				<p class="pill mb-4 bg-saffron-soft text-ink">🧡 Dutch vocabulary, played together</p>
 				<h1 class="text-4xl leading-tight font-black text-ink sm:text-5xl">
 					Flip, remember and <span class="text-teal-deep">match</span> your way to new Dutch words.
 				</h1>

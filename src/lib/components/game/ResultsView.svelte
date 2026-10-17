@@ -46,10 +46,12 @@
 							<p class="truncate font-extrabold">
 								{player.nickname}
 								{#if player.id === view.me}<span class="text-sm font-bold text-teal-deep">(you)</span>{/if}
-								{#if isWinner}<span class="pill ml-1 bg-saffron-soft align-middle text-ink">Winner</span>{/if}
-								{#if player.status === 'removed'}<span class="pill ml-1 bg-ink/10 align-middle">Removed</span>{/if}
 							</p>
-							<p class="text-sm text-ink-soft">{matchedPairs(game, player.id)} of {game.card_count / 2} pairs matched</p>
+							<p class="flex flex-wrap items-center gap-1 text-sm text-ink-soft">
+								{matchedPairs(game, player.id)} of {game.card_count / 2} pairs matched
+								{#if isWinner}<span class="pill bg-saffron-soft text-ink">🏆 Winner</span>{/if}
+								{#if player.status === 'removed'}<span class="pill bg-ink/10 text-ink">Removed</span>{/if}
+							</p>
 						</div>
 						<p class="text-right">
 							<span class="block text-2xl leading-none font-black tabular-nums">{player.score}</span>
