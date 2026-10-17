@@ -14,6 +14,8 @@ const FATAL_ERRORS: ReadonlySet<ErrorCode> = new Set(['removed', 'forbidden', 's
 const SILENT_ERRORS: ReadonlySet<ErrorCode> = new Set(['stale_state', 'duplicate_action']);
 
 const POLL_WHEN_DISCONNECTED_MS = 4_000;
+/** Safety net in case a broadcast is lost while the channel looks healthy. */
+const POLL_WHEN_LIVE_MS = 15_000;
 const DEADLINE_GRACE_MS = 250;
 
 /**
@@ -145,9 +147,15 @@ export class SessionSync {
 		this.tickTimer = setInterval(() => {
 			if (this.view.game?.status === 'active') this.now = this.serverNow();
 		}, 250);
+		let lastPoll = Date.now();
 		this.pollTimer = setInterval(() => {
-			if (this.connection !== 'live' && document.visibilityState === 'visible') void this.refresh();
-		}, POLL_WHEN_DISCONNECTED_MS);
+			if (document.visibilityState !== 'visible') return;
+			const interval = this.connection === 'live' ? POLL_WHEN_LIVE_MS : POLL_WHEN_DISCONNECTED_MS;
+			if (Date.now() - lastPoll >= interval) {
+				lastPoll = Date.now();
+				void this.refresh();
+			}
+		}, 1_000);
 
 		void this.connectRealtime();
 
