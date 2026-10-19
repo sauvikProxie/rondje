@@ -1,28 +1,35 @@
 -- =============================================================================
 -- Rondje — database schema (Supabase PostgreSQL)
 --
--- Apply to a NEW Supabase project with the SQL editor or `psql`, then apply
--- `supabase/seed.sql`. The script is written to be re-runnable (create-if-not-
--- exists / create-or-replace), but it is intended for a fresh project: it does
--- not migrate or drop any pre-existing Rondje schema.
+-- Apply with the SQL editor or `psql`, then apply `supabase/seed.sql`. The
+-- script is re-runnable (create-if-not-exists / create-or-replace) and also
+-- upgrades a project that has an earlier version of this schema in place
+-- (see "Upgrades" below). It never drops tables or rows.
 --
--- Design summary (see docs/rondje-spec.md sections 8, 9, 11, 14, 15):
+-- Design summary (see docs/rondje-spec.md sections 8, 9, 11, 14, 15, 23):
 --   * All state changes go through SECURITY DEFINER functions in `public` that
 --     authenticate the caller with auth.uid(), validate the request, lock the
 --     session row (SELECT ... FOR UPDATE) and perform the transition atomically.
 --   * Business errors are returned as {"ok": false, "error": "<code>"} instead
 --     of being raised, so that a lazy deadline resolution performed at the start
 --     of a rejected action is still committed.
---   * Clients have no direct access to the board layout, vocabulary, game,
---     board-cell, attempt or action tables. Card content leaves the database
---     only through private.session_view(), which reveals a position only while
---     it is flipped in the current attempt or after it has been matched.
+--   * A session plays one of two game modes: Matchen (memory, one shared board
+--     per game) or Fill in the Blanks (everyone answers the same grammar
+--     sentence each round). Players may be split into groups (teams).
+--   * Clients have no direct access to the board layout, vocabulary, question,
+--     game, round, answer, attempt or action tables. Card content leaves the
+--     database only through private.session_view(), which reveals a position
+--     only while it is flipped in the current attempt or after it has been
+--     matched. A sentence's correct answer is revealed only once its round is
+--     closed.
 --   * Every committed change increments game_sessions.revision and sends a
 --     Realtime broadcast {session_id, revision} on the private topic
 --     "session:<uuid>". Broadcast payloads never contain card content.
---   * Timing is serverless-safe: mismatch reveals and turn deadlines are stored
---     as database-clock timestamps and resolved lazily and idempotently by
---     private.resolve_overdue() under the session row lock.
+--   * There is no turn timer. The only timed transitions are short reveals
+--     (a Matchen mismatch, a closed Fill in the Blanks round), stored as
+--     database-clock timestamps and resolved lazily and idempotently by
+--     private.resolve_overdue() under the session row lock. The host can move a
+--     stalled game on with public.skip_turn().
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -87,7 +94,25 @@ end $$;
 
 do $$
 begin
-	create type public.game_end_reason as enum ('board_cleared', 'ended_by_host', 'not_enough_players');
+	create type public.game_end_reason as enum (
+		'board_cleared', 'ended_by_host', 'not_enough_players', 'all_rounds_played'
+	);
+exception when duplicate_object then null;
+end $$;
+-- Upgrade: value added with Fill in the Blanks (no-op on a fresh install).
+alter type public.game_end_reason add value if not exists 'all_rounds_played';
+
+do $$
+begin
+	create type public.game_mode as enum ('matchen', 'fill_blanks');
+exception when duplicate_object then null;
+end $$;
+
+do $$
+begin
+	create type public.grammar_topic as enum (
+		'verbs', 'articles', 'prepositions', 'pronouns', 'adjectives', 'plurals', 'past_tense', 'word_order'
+	);
 exception when duplicate_object then null;
 end $$;
 
@@ -109,13 +134,21 @@ immutable
 set search_path = ''
 as $$ select interval '2500 milliseconds' $$;
 
--- Turn time limit: 60 seconds (spec 9.5).
-create or replace function private.turn_time_limit()
+-- Fill in the Blanks: how long a closed round shows the answer (spec 23.4).
+create or replace function private.round_reveal_interval()
 returns interval
 language sql
 immutable
 set search_path = ''
-as $$ select interval '60 seconds' $$;
+as $$ select interval '4 seconds' $$;
+
+-- Maximum number of groups a session can be split into (spec 23.3).
+create or replace function private.max_groups()
+returns smallint
+language sql
+immutable
+set search_path = ''
+as $$ select 4::smallint $$;
 
 -- Unambiguous join-code alphabet: no 0/O, 1/I/L.
 create or replace function private.join_code_alphabet()
@@ -139,6 +172,37 @@ as $$
 	]::text[]
 $$;
 
+-- Normalised form of a Fill in the Blanks answer: case, surrounding and
+-- repeated spaces, typographic apostrophes and final punctuation are ignored
+-- (mirrored by normalizeAnswer() in src/lib/game/blanks.ts).
+create or replace function private.normalize_answer(p_answer text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+	select regexp_replace(
+		regexp_replace(translate(lower(btrim(coalesce(p_answer, ''))), '’‘', ''''''), '\s+', ' ', 'g'),
+		'\s*[.!?]+$', ''
+	)
+$$;
+
+-- Three distinct wrong options, none equal to the answer (used by a CHECK).
+create or replace function private.valid_distractors(p_answer text, p_distractors text[])
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+	select cardinality(p_distractors) = 3
+		and array_position(p_distractors, null) is null
+		and (
+			select count(distinct private.normalize_answer(d)) = 3
+				and bool_and(private.normalize_answer(d) <> private.normalize_answer(p_answer) and d = btrim(d) and d <> '')
+			from unnest(p_distractors) as d
+		)
+$$;
+
 -- -----------------------------------------------------------------------------
 -- Tables
 -- -----------------------------------------------------------------------------
@@ -150,15 +214,20 @@ create table if not exists public.hosts (
 	created_at timestamptz not null default now()
 );
 
--- 14.2 Game sessions: one session = one Matchen game = one shared table.
+-- 14.2 Game sessions: one session = one game = one shared table.
+-- `variant` applies to Matchen only. `pair_count` is the number of pairs in
+-- Matchen and the number of sentences (rounds) in Fill in the Blanks.
 create table if not exists public.game_sessions (
 	id uuid primary key default gen_random_uuid(),
 	host_id uuid not null references public.hosts (id) on delete cascade,
 	name text not null,
 	join_code text not null,
 	scheduled_at timestamptz,
-	variant public.game_variant not null,
+	mode public.game_mode not null default 'matchen',
+	variant public.game_variant,
 	pair_count smallint not null,
+	-- 1 = no groups; 2..max_groups() = players are split into that many teams.
+	group_count smallint not null default 1,
 	status public.session_status not null default 'lobby',
 	revision bigint not null default 1,
 	created_at timestamptz not null default now(),
@@ -188,8 +257,11 @@ create table if not exists public.players (
 	avatar text not null,
 	level public.proficiency_level not null,
 	status public.player_status not null default 'active',
-	-- 14.8 Scores: one point per matched pair, written only by flip_card().
+	-- 14.8 Scores: one point per matched pair or correct sentence, written only
+	-- by flip_card() and submit_answer().
 	score integer not null default 0,
+	-- Team (1-based), assigned by start_game() when the session uses groups.
+	group_number smallint,
 	joined_at timestamptz not null default now(),
 	removed_at timestamptz,
 	constraint players_session_user_key unique (session_id, user_id),
@@ -265,38 +337,42 @@ create table if not exists public.games (
 	session_id uuid not null references public.game_sessions (id) on delete cascade,
 	status public.game_status not null default 'active',
 	-- Fixed random turn order (player ids); removed players are skipped.
+	-- With groups the order alternates between groups. Unused by Fill in the
+	-- Blanks, where everyone answers at once.
 	turn_order uuid[] not null,
+	-- Matchen: whose turn it is. Always null in Fill in the Blanks.
 	active_player_id uuid references public.players (id) on delete set null,
-	-- Pending first flip of the current attempt (board position).
+	-- Matchen: pending first flip of the current attempt (board position).
 	first_flip smallint,
-	-- Pending mismatch reveal: the two positions, visible until reveal_until.
+	-- Matchen: pending mismatch reveal, the two positions, visible until reveal_until.
 	mismatch_positions smallint[],
+	-- Matchen: end of a mismatch reveal. Fill in the Blanks: end of the answer
+	-- reveal of the current (closed) round.
 	reveal_until timestamptz,
-	turn_until timestamptz,
+	-- Fill in the Blanks: 0-based index of the round being played.
+	current_round smallint,
 	end_reason public.game_end_reason,
 	winner_ids uuid[] not null default '{}',
+	-- Groups with the highest total, when the session uses groups.
+	winning_groups smallint[] not null default '{}',
 	started_at timestamptz not null default now(),
 	ended_at timestamptz,
 	constraint games_session_key unique (session_id),
-	constraint games_turn_order_size check (cardinality(turn_order) >= 2),
-	constraint games_mismatch_shape check (
-		(mismatch_positions is null and reveal_until is null)
-		or (cardinality(mismatch_positions) = 2 and reveal_until is not null and first_flip is null)
-	),
-	constraint games_completion check (
-		(status = 'active' and end_reason is null and ended_at is null and active_player_id is not null)
-		or (status = 'completed' and end_reason is not null and ended_at is not null
-			and first_flip is null and mismatch_positions is null and turn_until is null)
-	)
+	constraint games_turn_order_size check (cardinality(turn_order) >= 2)
+	-- games_mismatch_shape and games_completion: see "Upgrades" below.
 );
 
--- 14.7 Board layout: stored ONCE per game. Never readable by clients.
+-- 14.7 Board layout: stored ONCE per game. Never readable by clients. In
+-- Matchen every player plays on this one shared board: a matched pair stays
+-- matched for everyone, credited to the player who found it.
 create table if not exists public.game_layout (
 	game_id uuid not null references public.games (id) on delete cascade,
 	position smallint not null,
 	pair_id uuid not null references public.vocabulary_pairs (id) on delete restrict,
 	-- 0 = (item_a, face_a), 1 = (item_b, face_b)
 	side smallint not null,
+	matched_by uuid references public.players (id) on delete set null,
+	matched_at timestamptz,
 	primary key (game_id, position),
 	constraint game_layout_position_range check (position between 0 and 23),
 	constraint game_layout_side check (side in (0, 1)),
@@ -304,17 +380,56 @@ create table if not exists public.game_layout (
 	constraint game_layout_pair_side_key unique (game_id, pair_id, side)
 );
 
--- 14.7 Player boards: per-player state for every layout position.
-create table if not exists public.board_cells (
-	game_id uuid not null,
-	player_id uuid not null references public.players (id) on delete cascade,
-	position smallint not null,
-	matched_at timestamptz,
-	primary key (player_id, position),
-	foreign key (game_id, position) references public.game_layout (game_id, position) on delete cascade
+-- Fill in the Blanks content: a Dutch sentence with exactly one blank ("___"),
+-- its correct answer and three wrong options for multiple choice.
+create table if not exists public.grammar_questions (
+	id uuid primary key default gen_random_uuid(),
+	slug text not null,
+	sentence text not null,
+	answer text not null,
+	distractors text[] not null,
+	-- English meaning of the whole sentence, shown as a hint.
+	translation text not null,
+	topic public.grammar_topic not null,
+	level public.proficiency_level,
+	active boolean not null default true,
+	created_at timestamptz not null default now(),
+	constraint grammar_questions_slug_key unique (slug),
+	constraint grammar_questions_slug_format check (slug ~ '^[a-z0-9_]+$'),
+	constraint grammar_questions_one_blank check (
+		sentence = btrim(sentence) and sentence like '%\_\_\_%' and sentence not like '%\_\_\_%\_\_\_%'
+	),
+	constraint grammar_questions_answer check (answer = btrim(answer) and char_length(answer) between 1 and 40),
+	constraint grammar_questions_distractors check (private.valid_distractors(answer, distractors)),
+	constraint grammar_questions_translation check (char_length(btrim(translation)) between 1 and 200)
 );
 
-create index if not exists board_cells_game_idx on public.board_cells (game_id);
+-- Fill in the Blanks: the questions of one game, in play order. The options are
+-- shuffled once per game so every player sees them in the same order.
+create table if not exists public.game_rounds (
+	game_id uuid not null references public.games (id) on delete cascade,
+	round smallint not null,
+	question_id uuid not null references public.grammar_questions (id) on delete restrict,
+	options text[] not null,
+	closed_at timestamptz,
+	primary key (game_id, round),
+	constraint game_rounds_round_range check (round between 0 and 11),
+	constraint game_rounds_question_key unique (game_id, question_id),
+	constraint game_rounds_options check (cardinality(options) = 4)
+);
+
+-- Fill in the Blanks: one answer per player per round.
+create table if not exists public.round_answers (
+	game_id uuid not null,
+	round smallint not null,
+	player_id uuid not null references public.players (id) on delete cascade,
+	answer text not null,
+	correct boolean not null,
+	answered_at timestamptz not null default now(),
+	primary key (game_id, round, player_id),
+	foreign key (game_id, round) references public.game_rounds (game_id, round) on delete cascade,
+	constraint round_answers_length check (char_length(answer) between 1 and 60)
+);
 
 -- Attempt log ("the server records the attempt").
 create table if not exists public.game_attempts (
@@ -342,6 +457,61 @@ create table if not exists public.processed_actions (
 );
 
 create index if not exists processed_actions_game_idx on public.processed_actions (game_id);
+
+create index if not exists round_answers_player_idx on public.round_answers (player_id);
+create index if not exists grammar_questions_active_idx on public.grammar_questions (id) where active;
+
+-- -----------------------------------------------------------------------------
+-- Upgrades (idempotent). Bring a project created with an earlier version of
+-- this schema up to date: shared Matchen board, no turn timer, groups and Fill
+-- in the Blanks. On a fresh install the columns already exist and the
+-- constraints are simply re-created. Finish or end running games first: a game
+-- in progress during the upgrade loses its per-player board state.
+--
+-- The earlier per-player `public.board_cells` table is no longer used. It is
+-- left in place (with RLS on and no client grants) so no data is dropped; it
+-- can be removed manually with `drop table public.board_cells;`.
+-- -----------------------------------------------------------------------------
+
+alter table public.game_sessions add column if not exists mode public.game_mode not null default 'matchen';
+alter table public.game_sessions add column if not exists group_count smallint not null default 1;
+alter table public.game_sessions alter column variant drop not null;
+alter table public.game_sessions drop constraint if exists game_sessions_mode_variant;
+alter table public.game_sessions add constraint game_sessions_mode_variant check (
+	(mode = 'matchen' and variant is not null) or (mode = 'fill_blanks' and variant is null)
+);
+alter table public.game_sessions drop constraint if exists game_sessions_group_count;
+alter table public.game_sessions add constraint game_sessions_group_count check (group_count between 1 and 4);
+
+alter table public.players add column if not exists group_number smallint;
+alter table public.players drop constraint if exists players_group_number;
+alter table public.players add constraint players_group_number check (group_number is null or group_number between 1 and 4);
+
+alter table public.games add column if not exists current_round smallint;
+alter table public.games add column if not exists winning_groups smallint[] not null default '{}';
+alter table public.games drop constraint if exists games_mismatch_shape;
+alter table public.games drop constraint if exists games_completion;
+-- The 60-second turn timer was removed.
+alter table public.games drop column if exists turn_until;
+alter table public.games add constraint games_mismatch_shape check (
+	mismatch_positions is null
+	or (cardinality(mismatch_positions) = 2 and reveal_until is not null and first_flip is null)
+);
+alter table public.games add constraint games_completion check (
+	(status = 'active' and end_reason is null and ended_at is null)
+	or (status = 'completed' and end_reason is not null and ended_at is not null
+		and first_flip is null and mismatch_positions is null and reveal_until is null)
+);
+
+alter table public.game_layout add column if not exists matched_by uuid references public.players (id) on delete set null;
+alter table public.game_layout add column if not exists matched_at timestamptz;
+
+-- Functions whose signature changed or that are no longer used.
+drop function if exists public.create_session(text, text, integer, timestamptz);
+drop function if exists public.flip_card(uuid, uuid, integer, uuid, bigint);
+drop function if exists private.complete_game(uuid, public.game_end_reason, uuid[]);
+drop function if exists private.top_scorers(uuid);
+drop function if exists private.turn_time_limit();
 
 -- -----------------------------------------------------------------------------
 -- Vocabulary validation trigger
@@ -390,22 +560,26 @@ alter table public.vocabulary_items enable row level security;
 alter table public.vocabulary_pairs enable row level security;
 alter table public.games enable row level security;
 alter table public.game_layout enable row level security;
-alter table public.board_cells enable row level security;
 alter table public.game_attempts enable row level security;
 alter table public.processed_actions enable row level security;
+alter table public.grammar_questions enable row level security;
+alter table public.game_rounds enable row level security;
+alter table public.round_answers enable row level security;
 
 -- Supabase grants table privileges to anon/authenticated by default; remove
 -- them and grant back only what is needed.
 revoke all on table
 	public.hosts, public.game_sessions, public.players, public.vocabulary_items,
-	public.vocabulary_pairs, public.games, public.game_layout, public.board_cells,
-	public.game_attempts, public.processed_actions
+	public.vocabulary_pairs, public.games, public.game_layout,
+	public.game_attempts, public.processed_actions,
+	public.grammar_questions, public.game_rounds, public.round_answers
 from public, anon, authenticated;
 
 grant all on table
 	public.hosts, public.game_sessions, public.players, public.vocabulary_items,
-	public.vocabulary_pairs, public.games, public.game_layout, public.board_cells,
-	public.game_attempts, public.processed_actions
+	public.vocabulary_pairs, public.games, public.game_layout,
+	public.game_attempts, public.processed_actions,
+	public.grammar_questions, public.game_rounds, public.round_answers
 to service_role;
 
 -- Read-only access for the host dashboard. All writes go through functions.
@@ -436,11 +610,11 @@ create policy "players: player reads own row" on public.players
 	for select to authenticated
 	using (user_id = (select auth.uid()));
 
--- vocabulary_items, vocabulary_pairs, games, game_layout, board_cells,
--- game_attempts and processed_actions intentionally have NO policies and NO
--- grants for anon/authenticated: RLS denies everything. Clients receive the
--- permitted subset only through public.get_session_view() and the action
--- functions below.
+-- vocabulary_items, vocabulary_pairs, games, game_layout, game_attempts,
+-- processed_actions, grammar_questions, game_rounds and round_answers
+-- intentionally have NO policies and NO grants for anon/authenticated: RLS
+-- denies everything. Clients receive the permitted subset only through
+-- public.get_session_view() and the action functions below.
 
 -- -----------------------------------------------------------------------------
 -- Private helpers
@@ -527,45 +701,83 @@ begin
 end;
 $$;
 
--- Active (non-removed) players with the highest score.
-create or replace function private.top_scorers(p_session_id uuid)
-returns uuid[]
-language sql
+-- The winners of a game (spec 10, 23.3). Removed players keep their points but
+-- cannot win.
+--   * Without groups: the active players with the highest score.
+--   * With groups: the groups with the most points per member (the same order
+--     as the group totals when groups are equally large; fair when they are
+--     not), and the active members of those groups. Every member's points
+--     count for their group, including members removed during the game; a
+--     group without active members cannot win.
+create or replace function private.decide_winners(
+	p_session_id uuid,
+	out winner_ids uuid[],
+	out winning_groups smallint[]
+)
+language plpgsql
 stable
 security definer
 set search_path = ''
 as $$
+declare
+	v_group_count smallint;
+begin
+	select s.group_count into v_group_count from public.game_sessions s where s.id = p_session_id;
+
+	if coalesce(v_group_count, 1) <= 1 then
+		winning_groups := '{}';
+		select coalesce(array_agg(p.id order by p.joined_at, p.id), '{}')
+		into winner_ids
+		from public.players p
+		where p.session_id = p_session_id
+			and p.status = 'active'
+			and p.score = (
+				select max(q.score) from public.players q
+				where q.session_id = p_session_id and q.status = 'active'
+			);
+		return;
+	end if;
+
+	with group_scores as (
+		select p.group_number as g, sum(p.score)::numeric / count(*) as per_member
+		from public.players p
+		where p.session_id = p_session_id and p.group_number is not null
+		group by p.group_number
+		having bool_or(p.status = 'active')
+	)
+	select coalesce(array_agg(gs.g order by gs.g), '{}')
+	into winning_groups
+	from group_scores gs
+	where gs.per_member = (select max(x.per_member) from group_scores x);
+
 	select coalesce(array_agg(p.id order by p.joined_at, p.id), '{}')
+	into winner_ids
 	from public.players p
-	where p.session_id = p_session_id
-		and p.status = 'active'
-		and p.score = (
-			select max(q.score) from public.players q
-			where q.session_id = p_session_id and q.status = 'active'
-		)
+	where p.session_id = p_session_id and p.status = 'active' and p.group_number = any (winning_groups);
+end;
 $$;
 
 -- Mark the game and session completed. Caller holds the session row lock.
-create or replace function private.complete_game(
-	p_session_id uuid,
-	p_reason public.game_end_reason,
-	p_winner_ids uuid[]
-)
+create or replace function private.complete_game(p_session_id uuid, p_reason public.game_end_reason)
 returns void
 language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+	v_winners record;
 begin
+	select * into v_winners from private.decide_winners(p_session_id);
+
 	update public.games
 	set status = 'completed',
 		end_reason = p_reason,
-		winner_ids = coalesce(p_winner_ids, private.top_scorers(p_session_id)),
+		winner_ids = v_winners.winner_ids,
+		winning_groups = v_winners.winning_groups,
 		active_player_id = null,
 		first_flip = null,
 		mismatch_positions = null,
 		reveal_until = null,
-		turn_until = null,
 		ended_at = now()
 	where session_id = p_session_id and status = 'active';
 
@@ -575,10 +787,67 @@ begin
 end;
 $$;
 
--- Lazily resolve an overdue mismatch reveal or turn deadline (spec 9.4, 9.6).
--- Must be called while holding the session row lock. Performs at most one
--- transition; the deadline it sets is always in the future, so calling it
--- again immediately is a no-op (idempotent). Returns true if state changed.
+-- Fill in the Blanks: close the current round and show its answer until
+-- reveal_until. Caller holds the session row lock; no-op if already closed.
+create or replace function private.close_round(p_game_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+	v_game public.games%rowtype;
+begin
+	select * into v_game from public.games where id = p_game_id for update;
+	if v_game.status <> 'active' or v_game.reveal_until is not null then
+		return;
+	end if;
+	update public.game_rounds set closed_at = now()
+	where game_id = p_game_id and round = v_game.current_round;
+	update public.games set reveal_until = now() + private.round_reveal_interval()
+	where id = p_game_id;
+end;
+$$;
+
+-- Fill in the Blanks: close the current round once every active player has
+-- answered it. Returns true if it closed the round.
+create or replace function private.close_round_if_complete(p_game_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+	v_game public.games%rowtype;
+begin
+	select * into v_game from public.games where id = p_game_id;
+	if v_game.status <> 'active' or v_game.reveal_until is not null then
+		return false;
+	end if;
+	if exists (
+		select 1 from public.players p
+		where p.session_id = v_game.session_id and p.status = 'active'
+			and not exists (
+				select 1 from public.round_answers a
+				where a.game_id = p_game_id and a.round = v_game.current_round and a.player_id = p.id
+			)
+	) then
+		return false;
+	end if;
+	perform private.close_round(p_game_id);
+	return true;
+end;
+$$;
+
+-- Lazily resolve an overdue reveal (spec 9.4, 23.4). Must be called while
+-- holding the session row lock. Performs at most one transition and clears the
+-- deadline, so calling it again immediately is a no-op (idempotent). Returns
+-- true if state changed.
+--   * Matchen: a mismatch reveal ended, the cards turn face down and the turn
+--     passes on.
+--   * Fill in the Blanks: the answer reveal ended, the next round starts, or
+--     the game ends after the last round.
+-- There is no turn timer (spec 23.1).
 create or replace function private.resolve_overdue(p_session_id uuid)
 returns boolean
 language plpgsql
@@ -587,41 +856,32 @@ set search_path = ''
 as $$
 declare
 	v_game public.games%rowtype;
-	v_next uuid;
+	v_round_count smallint;
 begin
 	select * into v_game
 	from public.games
 	where session_id = p_session_id
 	for update;
 
-	if not found or v_game.status <> 'active' then
+	if not found or v_game.status <> 'active' or v_game.reveal_until is null or v_game.reveal_until > now() then
 		return false;
 	end if;
 
 	if v_game.mismatch_positions is not null then
-		if v_game.reveal_until > now() then
-			return false;
-		end if;
-		-- Reveal finished: cards turn face down, turn passes on.
-		v_next := private.next_player(v_game.turn_order, v_game.active_player_id);
 		update public.games
 		set mismatch_positions = null,
 			reveal_until = null,
-			active_player_id = v_next,
-			turn_until = now() + private.turn_time_limit()
-		where id = v_game.id;
-	elsif v_game.turn_until is not null and v_game.turn_until <= now() then
-		-- Turn deadline passed: a pending first flip turns back, turn passes on.
-		insert into public.game_attempts (game_id, player_id, first_position, second_position, outcome)
-		values (v_game.id, v_game.active_player_id, v_game.first_flip, null, 'timeout');
-		v_next := private.next_player(v_game.turn_order, v_game.active_player_id);
-		update public.games
-		set first_flip = null,
-			active_player_id = v_next,
-			turn_until = now() + private.turn_time_limit()
+			active_player_id = private.next_player(v_game.turn_order, v_game.active_player_id)
 		where id = v_game.id;
 	else
-		return false;
+		select s.pair_count into v_round_count from public.game_sessions s where s.id = p_session_id;
+		if v_game.current_round + 1 >= v_round_count then
+			perform private.complete_game(p_session_id, 'all_rounds_played');
+		else
+			update public.games
+			set current_round = current_round + 1, reveal_until = null
+			where id = v_game.id;
+		end if;
 	end if;
 
 	perform private.bump_revision(p_session_id);
@@ -666,6 +926,7 @@ declare
 	v_game public.games%rowtype;
 	v_role text;
 	v_me uuid;
+	v_level public.proficiency_level;
 	v_players jsonb;
 	v_game_json jsonb;
 	v_visible smallint[];
@@ -678,7 +939,7 @@ begin
 	if v_session.host_id = p_user_id then
 		v_role := 'host';
 	else
-		select id into v_me
+		select id, level into v_me, v_level
 		from public.players
 		where session_id = p_session_id and user_id = p_user_id and status = 'active';
 		if v_me is null then
@@ -694,6 +955,7 @@ begin
 			'level', p.level,
 			'status', p.status,
 			'score', p.score,
+			'group', p.group_number,
 			'joined_at', p.joined_at
 		) order by p.joined_at, p.id), '[]'::jsonb)
 	into v_players
@@ -702,63 +964,112 @@ begin
 
 	select * into v_game from public.games where session_id = p_session_id;
 	if found then
-		-- Visible positions: matched on some board, or flipped in the current
-		-- attempt / pending mismatch reveal. Nothing else is ever revealed.
-		select coalesce(array_agg(distinct bc.position), '{}')
-		into v_visible
-		from public.board_cells bc
-		where bc.game_id = v_game.id and bc.matched_at is not null;
-
-		if v_game.first_flip is not null then
-			v_visible := v_visible || v_game.first_flip;
-		end if;
-		if v_game.mismatch_positions is not null then
-			v_visible := v_visible || v_game.mismatch_positions;
-		end if;
-
 		v_game_json := jsonb_build_object(
 			'status', v_game.status,
-			'card_count', v_session.pair_count * 2,
 			'turn_order', to_jsonb(v_game.turn_order),
 			'active_player_id', v_game.active_player_id,
-			'first_flip', v_game.first_flip,
-			'mismatch_positions', to_jsonb(v_game.mismatch_positions),
 			'reveal_until', v_game.reveal_until,
-			'turn_until', v_game.turn_until,
 			'end_reason', v_game.end_reason,
 			'winner_ids', to_jsonb(v_game.winner_ids),
+			'winning_groups', to_jsonb(v_game.winning_groups),
 			'started_at', v_game.started_at,
-			'ended_at', v_game.ended_at,
-			'faces', (
-				select coalesce(jsonb_object_agg(l.position::text, private.card_face(l.pair_id, l.side)), '{}'::jsonb)
-				from public.game_layout l
-				where l.game_id = v_game.id and l.position = any (v_visible)
-			),
-			'boards', (
-				select coalesce(jsonb_object_agg(s.player_id::text, s.matched), '{}'::jsonb)
-				from (
-					select bc.player_id,
-						coalesce(jsonb_agg(bc.position order by bc.position)
-							filter (where bc.matched_at is not null), '[]'::jsonb) as matched
-					from public.board_cells bc
-					where bc.game_id = v_game.id
-					group by bc.player_id
-				) s
-			),
-			'last_attempt', (
-				select jsonb_build_object(
-					'player_id', a.player_id,
-					'first_position', a.first_position,
-					'second_position', a.second_position,
-					'outcome', a.outcome,
-					'at', a.created_at
-				)
-				from public.game_attempts a
-				where a.game_id = v_game.id
-				order by a.id desc
-				limit 1
-			)
+			'ended_at', v_game.ended_at
 		);
+
+		if v_session.mode = 'matchen' then
+			-- Visible positions: matched, or flipped in the current attempt /
+			-- pending mismatch reveal. Nothing else is ever revealed.
+			select coalesce(array_agg(l.position), '{}')
+			into v_visible
+			from public.game_layout l
+			where l.game_id = v_game.id and l.matched_at is not null;
+
+			if v_game.first_flip is not null then
+				v_visible := v_visible || v_game.first_flip;
+			end if;
+			if v_game.mismatch_positions is not null then
+				v_visible := v_visible || v_game.mismatch_positions;
+			end if;
+
+			v_game_json := v_game_json || jsonb_build_object(
+				'card_count', v_session.pair_count * 2,
+				'first_flip', v_game.first_flip,
+				'mismatch_positions', to_jsonb(v_game.mismatch_positions),
+				'faces', (
+					select coalesce(jsonb_object_agg(l.position::text, private.card_face(l.pair_id, l.side)), '{}'::jsonb)
+					from public.game_layout l
+					where l.game_id = v_game.id and l.position = any (v_visible)
+				),
+				-- Matched position -> player who found the pair.
+				'matched', (
+					select coalesce(jsonb_object_agg(l.position::text, l.matched_by), '{}'::jsonb)
+					from public.game_layout l
+					where l.game_id = v_game.id and l.matched_at is not null
+				),
+				'last_attempt', (
+					select jsonb_build_object(
+						'player_id', a.player_id,
+						'first_position', a.first_position,
+						'second_position', a.second_position,
+						'outcome', a.outcome,
+						'at', a.created_at
+					)
+					from public.game_attempts a
+					where a.game_id = v_game.id
+					order by a.id desc
+					limit 1
+				),
+				'round', null
+			);
+		else
+			v_game_json := v_game_json || jsonb_build_object(
+				'card_count', 0,
+				'first_flip', null,
+				'mismatch_positions', null,
+				'faces', '{}'::jsonb,
+				'matched', '{}'::jsonb,
+				'last_attempt', null,
+				'round', case when v_game.status = 'active' then (
+					select jsonb_build_object(
+						'index', r.round,
+						'count', v_session.pair_count,
+						'phase', case when r.closed_at is null then 'answering' else 'reveal' end,
+						'sentence', q.sentence,
+						'translation', q.translation,
+						'topic', q.topic,
+						-- Multiple choice for Beginner/Elementary players (and the host);
+						-- Intermediate/Advanced players type the answer and get no options.
+						'answer_mode', case
+							when v_role = 'host' then null
+							when v_level in ('beginner', 'elementary') then 'choice'
+							else 'type'
+						end,
+						'options', case
+							when v_role = 'host' or v_level in ('beginner', 'elementary') then to_jsonb(r.options)
+						end,
+						'answered', (
+							select coalesce(jsonb_agg(a.player_id order by a.answered_at, a.player_id), '[]'::jsonb)
+							from public.round_answers a
+							where a.game_id = v_game.id and a.round = r.round
+						),
+						'my_answer', (
+							select a.answer from public.round_answers a
+							where a.game_id = v_game.id and a.round = r.round and a.player_id = v_me
+						),
+						-- The answer and who got it right only once the round is closed.
+						'correct_answer', case when r.closed_at is not null then q.answer end,
+						'results', case when r.closed_at is not null then (
+							select coalesce(jsonb_object_agg(a.player_id::text, a.correct), '{}'::jsonb)
+							from public.round_answers a
+							where a.game_id = v_game.id and a.round = r.round
+						) end
+					)
+					from public.game_rounds r
+					join public.grammar_questions q on q.id = r.question_id
+					where r.game_id = v_game.id and r.round = v_game.current_round
+				) end
+			);
+		end if;
 	end if;
 
 	return jsonb_build_object(
@@ -771,8 +1082,10 @@ begin
 			'name', v_session.name,
 			'join_code', v_session.join_code,
 			'scheduled_at', v_session.scheduled_at,
+			'mode', v_session.mode,
 			'variant', v_session.variant,
 			'pair_count', v_session.pair_count,
+			'group_count', v_session.group_count,
 			'status', v_session.status,
 			'created_at', v_session.created_at,
 			'started_at', v_session.started_at,
@@ -841,11 +1154,14 @@ $$;
 -- Public RPC functions (the only write path for clients)
 -- -----------------------------------------------------------------------------
 
--- Host: create a session (spec 5.3).
+-- Host: create a session (spec 5.3, 23). p_variant is required for Matchen and
+-- ignored for Fill in the Blanks; p_pair_count is pairs or sentences.
 create or replace function public.create_session(
 	p_name text,
+	p_mode text,
 	p_variant text,
 	p_pair_count integer,
+	p_group_count integer default 1,
 	p_scheduled_at timestamptz default null
 )
 returns jsonb
@@ -856,6 +1172,7 @@ as $$
 declare
 	v_uid uuid := auth.uid();
 	v_name text := btrim(coalesce(p_name, ''));
+	v_variant public.game_variant;
 	v_id uuid;
 	v_code text;
 	v_attempt int := 0;
@@ -869,11 +1186,20 @@ begin
 	if char_length(v_name) < 1 or char_length(v_name) > 60 then
 		return private.fail('invalid_session_name');
 	end if;
-	if p_variant is null or p_variant not in ('image_pairs', 'word_image', 'de_het', 'opposites') then
-		return private.fail('invalid_variant');
+	if p_mode is null or p_mode not in ('matchen', 'fill_blanks') then
+		return private.fail('invalid_mode');
+	end if;
+	if p_mode = 'matchen' then
+		if p_variant is null or p_variant not in ('image_pairs', 'word_image', 'de_het', 'opposites') then
+			return private.fail('invalid_variant');
+		end if;
+		v_variant := p_variant::public.game_variant;
 	end if;
 	if p_pair_count is null or p_pair_count not in (6, 8, 12) then
 		return private.fail('invalid_pair_count');
+	end if;
+	if p_group_count is null or p_group_count < 1 or p_group_count > private.max_groups() then
+		return private.fail('invalid_group_count');
 	end if;
 
 	insert into public.hosts (id) values (v_uid) on conflict (id) do nothing;
@@ -882,8 +1208,8 @@ begin
 		v_attempt := v_attempt + 1;
 		v_code := private.generate_join_code();
 		begin
-			insert into public.game_sessions (host_id, name, join_code, scheduled_at, variant, pair_count)
-			values (v_uid, v_name, v_code, p_scheduled_at, p_variant::public.game_variant, p_pair_count)
+			insert into public.game_sessions (host_id, name, join_code, scheduled_at, mode, variant, pair_count, group_count)
+			values (v_uid, v_name, v_code, p_scheduled_at, p_mode::public.game_mode, v_variant, p_pair_count, p_group_count)
 			returning id into v_id;
 			exit;
 		exception when unique_violation then
@@ -943,8 +1269,10 @@ begin
 			'id', v_session.id,
 			'name', v_session.name,
 			'join_code', v_session.join_code,
+			'mode', v_session.mode,
 			'variant', v_session.variant,
 			'pair_count', v_session.pair_count,
+			'group_count', v_session.group_count,
 			'status', v_session.status,
 			'scheduled_at', v_session.scheduled_at
 		)
@@ -1069,11 +1397,7 @@ begin
 
 	if v_session.status = 'in_progress' and exists (
 		select 1 from public.games g
-		where g.session_id = p_session_id and g.status = 'active'
-			and (
-				(g.mismatch_positions is not null and g.reveal_until <= now())
-				or (g.mismatch_positions is null and g.turn_until <= now())
-			)
+		where g.session_id = p_session_id and g.status = 'active' and g.reveal_until <= now()
 	) then
 		perform 1 from public.game_sessions where id = p_session_id for update;
 		perform private.resolve_overdue(p_session_id);
@@ -1083,8 +1407,9 @@ begin
 end;
 $$;
 
--- Host: start the game (spec 6.4, 8.1). Board generation is atomic: any
--- failure raises and rolls back the whole transaction.
+-- Host: start the game (spec 6.4, 8.1, 23). Initialisation is atomic: an
+-- unexpected failure raises and rolls back the whole transaction; business
+-- errors are returned before anything is written.
 create or replace function public.start_game(p_session_id uuid)
 returns jsonb
 language plpgsql
@@ -1116,7 +1441,7 @@ begin
 		return private.respond(p_session_id, 'session_not_in_lobby');
 	end if;
 
-	-- Random, server-side turn order over all eligible (non-removed) players.
+	-- Random, server-side order over all eligible (non-removed) players.
 	select coalesce(array_agg(p.id order by gen_random_uuid()), '{}')
 	into v_player_ids
 	from public.players p
@@ -1125,61 +1450,97 @@ begin
 	if cardinality(v_player_ids) < 2 then
 		return private.respond(p_session_id, 'not_enough_players');
 	end if;
-
-	-- Select random valid pairs; no two pairs may share an emoji or a word.
-	for r in
-		select p.id,
-			ia.emoji as emoji_a, ia.word as word_a,
-			ib.emoji as emoji_b, ib.word as word_b
-		from public.vocabulary_pairs p
-		join public.vocabulary_items ia on ia.id = p.item_a
-		join public.vocabulary_items ib on ib.id = p.item_b
-		where p.variant = v_session.variant and p.active and ia.active and ib.active
-		order by gen_random_uuid()
-	loop
-		v_tokens := array_remove(array[
-			'e:' || r.emoji_a, 'w:' || lower(r.word_a),
-			'e:' || r.emoji_b, 'w:' || lower(r.word_b)
-		], null);
-		if not (v_tokens && v_used) then
-			v_selected := v_selected || r.id;
-			v_used := v_used || v_tokens;
-			exit when cardinality(v_selected) = v_session.pair_count;
-		end if;
-	end loop;
-
-	if cardinality(v_selected) < v_session.pair_count then
-		return private.respond(p_session_id, 'not_enough_vocabulary');
+	if cardinality(v_player_ids) < v_session.group_count then
+		return private.respond(p_session_id, 'not_enough_players_for_groups');
 	end if;
 
-	insert into public.games (session_id, turn_order, active_player_id, turn_until)
-	values (p_session_id, v_player_ids, v_player_ids[1], now() + private.turn_time_limit())
+	if v_session.mode = 'fill_blanks' then
+		select coalesce(array_agg(q.id), '{}')
+		into v_selected
+		from (
+			select q.id from public.grammar_questions q
+			where q.active
+			order by gen_random_uuid()
+			limit v_session.pair_count
+		) q;
+
+		if cardinality(v_selected) < v_session.pair_count then
+			return private.respond(p_session_id, 'not_enough_questions');
+		end if;
+	else
+		-- Select random valid pairs; no two pairs may share an emoji or a word.
+		for r in
+			select p.id,
+				ia.emoji as emoji_a, ia.word as word_a,
+				ib.emoji as emoji_b, ib.word as word_b
+			from public.vocabulary_pairs p
+			join public.vocabulary_items ia on ia.id = p.item_a
+			join public.vocabulary_items ib on ib.id = p.item_b
+			where p.variant = v_session.variant and p.active and ia.active and ib.active
+			order by gen_random_uuid()
+		loop
+			v_tokens := array_remove(array[
+				'e:' || r.emoji_a, 'w:' || lower(r.word_a),
+				'e:' || r.emoji_b, 'w:' || lower(r.word_b)
+			], null);
+			if not (v_tokens && v_used) then
+				v_selected := v_selected || r.id;
+				v_used := v_used || v_tokens;
+				exit when cardinality(v_selected) = v_session.pair_count;
+			end if;
+		end loop;
+
+		if cardinality(v_selected) < v_session.pair_count then
+			return private.respond(p_session_id, 'not_enough_vocabulary');
+		end if;
+	end if;
+
+	-- Groups: deal the shuffled players round-robin, so groups differ in size
+	-- by at most one and the turn order alternates between groups.
+	update public.players p
+	set group_number = case
+		when v_session.group_count > 1 then ((o.ord - 1) % v_session.group_count + 1)::smallint
+	end
+	from unnest(v_player_ids) with ordinality as o (player_id, ord)
+	where p.id = o.player_id;
+
+	insert into public.games (session_id, turn_order, active_player_id, current_round)
+	values (
+		p_session_id,
+		v_player_ids,
+		case when v_session.mode = 'matchen' then v_player_ids[1] end,
+		case when v_session.mode = 'fill_blanks' then 0 end
+	)
 	returning id into v_game_id;
 
-	-- One shuffled layout: both sides of every selected pair.
-	insert into public.game_layout (game_id, position, pair_id, side)
-	select v_game_id,
-		(row_number() over (order by gen_random_uuid()) - 1)::smallint,
-		sel.pair_id,
-		sides.side
-	from unnest(v_selected) as sel (pair_id)
-	cross join (values (0::smallint), (1::smallint)) as sides (side);
+	if v_session.mode = 'fill_blanks' then
+		-- Rounds in random order; each round's four options shuffled once.
+		insert into public.game_rounds (game_id, round, question_id, options)
+		select v_game_id,
+			(o.ord - 1)::smallint,
+			q.id,
+			(select array_agg(x order by gen_random_uuid()) from unnest(array[q.answer] || q.distractors) as x)
+		from unnest(v_selected) with ordinality as o (question_id, ord)
+		join public.grammar_questions q on q.id = o.question_id;
+	else
+		-- One shuffled layout shared by all players: both sides of every pair.
+		insert into public.game_layout (game_id, position, pair_id, side)
+		select v_game_id,
+			(row_number() over (order by gen_random_uuid()) - 1)::smallint,
+			sel.pair_id,
+			sides.side
+		from unnest(v_selected) as sel (pair_id)
+		cross join (values (0::smallint), (1::smallint)) as sides (side);
 
-	-- Invariants: exactly 2 * pair_count positions, every pair exactly twice.
-	if (select count(*) from public.game_layout where game_id = v_game_id) <> v_session.pair_count * 2
-		or exists (
-			select 1 from public.game_layout where game_id = v_game_id
-			group by pair_id having count(*) <> 2
-		) then
-		raise exception 'board layout invariant violated';
+		-- Invariants: exactly 2 * pair_count positions, every pair exactly twice.
+		if (select count(*) from public.game_layout where game_id = v_game_id) <> v_session.pair_count * 2
+			or exists (
+				select 1 from public.game_layout where game_id = v_game_id
+				group by pair_id having count(*) <> 2
+			) then
+			raise exception 'board layout invariant violated';
+		end if;
 	end if;
-
-	-- One board per eligible player, all referencing the same layout.
-	insert into public.board_cells (game_id, player_id, position)
-	select v_game_id, pid, l.position
-	from unnest(v_player_ids) as pid
-	cross join public.game_layout l
-	where l.game_id = v_game_id;
 
 	update public.game_sessions
 	set status = 'in_progress', started_at = now()
@@ -1190,10 +1551,9 @@ begin
 end;
 $$;
 
--- Player: flip one card on their own board (spec 8.3, 9.2–9.4).
+-- Player: flip one card on the shared Matchen board (spec 8.3, 9.2–9.4, 23.2).
 create or replace function public.flip_card(
 	p_session_id uuid,
-	p_board_player_id uuid,
 	p_position integer,
 	p_action_id uuid,
 	p_revision bigint
@@ -1215,8 +1575,7 @@ begin
 	if v_uid is null then
 		return private.fail('not_authenticated');
 	end if;
-	if p_session_id is null or p_board_player_id is null or p_position is null
-		or p_action_id is null or p_revision is null then
+	if p_session_id is null or p_position is null or p_action_id is null or p_revision is null then
 		return private.fail('invalid_input');
 	end if;
 
@@ -1244,13 +1603,13 @@ begin
 	if v_session.status <> 'in_progress' then
 		return private.respond(p_session_id, 'game_not_active');
 	end if;
+	if v_session.mode <> 'matchen' then
+		return private.respond(p_session_id, 'wrong_game_mode');
+	end if;
 	select * into v_game from public.games where session_id = p_session_id;
 
 	if p_revision <> v_session.revision then
 		return private.respond(p_session_id, 'stale_state');
-	end if;
-	if p_board_player_id <> v_player.id then
-		return private.respond(p_session_id, 'not_your_board');
 	end if;
 	if v_game.active_player_id is distinct from v_player.id then
 		return private.respond(p_session_id, 'not_your_turn');
@@ -1262,8 +1621,8 @@ begin
 		return private.respond(p_session_id, 'invalid_position');
 	end if;
 	if exists (
-		select 1 from public.board_cells
-		where player_id = v_player.id and position = p_position and matched_at is not null
+		select 1 from public.game_layout
+		where game_id = v_game.id and position = p_position and matched_at is not null
 	) then
 		return private.respond(p_session_id, 'already_matched');
 	end if;
@@ -1284,10 +1643,11 @@ begin
 		where game_id = v_game.id and position = p_position;
 
 		if v_pair_first = v_pair_second then
-			-- Match: both positions matched on this player's board only, +1 point.
-			update public.board_cells
-			set matched_at = now()
-			where player_id = v_player.id and position in (v_game.first_flip, p_position);
+			-- Match: the pair stays face up on the shared board for everyone,
+			-- credited to this player, +1 point.
+			update public.game_layout
+			set matched_by = v_player.id, matched_at = now()
+			where game_id = v_game.id and position in (v_game.first_flip, p_position);
 
 			update public.players set score = score + 1 where id = v_player.id;
 
@@ -1295,17 +1655,15 @@ begin
 			values (v_game.id, v_player.id, v_game.first_flip, p_position, 'match');
 
 			select count(*) into v_remaining
-			from public.board_cells
-			where player_id = v_player.id and matched_at is null;
+			from public.game_layout
+			where game_id = v_game.id and matched_at is null;
 
 			if v_remaining = 0 then
-				-- Board cleared: the game ends immediately and this player wins.
-				perform private.complete_game(p_session_id, 'board_cleared', array[v_player.id]);
+				-- Every pair found: the game ends; highest score (or group) wins.
+				perform private.complete_game(p_session_id, 'board_cleared');
 			else
-				-- Same player goes again with a fresh deadline.
-				update public.games
-				set first_flip = null, turn_until = now() + private.turn_time_limit()
-				where id = v_game.id;
+				-- Same player goes again.
+				update public.games set first_flip = null where id = v_game.id;
 			end if;
 		else
 			-- Mismatch: both stay visible until reveal_until, then turn passes.
@@ -1315,8 +1673,7 @@ begin
 			update public.games
 			set first_flip = null,
 				mismatch_positions = array[v_game.first_flip, p_position]::smallint[],
-				reveal_until = now() + private.reveal_interval(),
-				turn_until = null
+				reveal_until = now() + private.reveal_interval()
 			where id = v_game.id;
 		end if;
 	end if;
@@ -1355,7 +1712,159 @@ begin
 		return private.respond(p_session_id, 'game_not_active');
 	end if;
 
-	perform private.complete_game(p_session_id, 'ended_by_host', null);
+	perform private.complete_game(p_session_id, 'ended_by_host');
+	perform private.bump_revision(p_session_id);
+	return private.respond(p_session_id);
+end;
+$$;
+
+-- Player: answer the current Fill in the Blanks round (spec 23.4). One answer
+-- per player per round, final once submitted. Beginner and Elementary players
+-- must pick one of the round's options; the others type the answer.
+create or replace function public.submit_answer(p_session_id uuid, p_round integer, p_answer text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+	v_uid uuid := auth.uid();
+	v_session public.game_sessions%rowtype;
+	v_player public.players%rowtype;
+	v_game public.games%rowtype;
+	v_round public.game_rounds%rowtype;
+	v_answer text := btrim(coalesce(p_answer, ''));
+	v_correct_answer text;
+	v_correct boolean;
+begin
+	if v_uid is null then
+		return private.fail('not_authenticated');
+	end if;
+	if p_session_id is null or p_round is null then
+		return private.fail('invalid_input');
+	end if;
+
+	select * into v_session from public.game_sessions where id = p_session_id for update;
+	if not found then
+		return private.fail('session_not_found');
+	end if;
+
+	select * into v_player from public.players where session_id = p_session_id and user_id = v_uid;
+	if not found then
+		return private.fail('forbidden');
+	end if;
+	if v_player.status = 'removed' then
+		return private.fail('removed');
+	end if;
+
+	perform private.resolve_overdue(p_session_id);
+
+	select * into v_session from public.game_sessions where id = p_session_id;
+	if v_session.status <> 'in_progress' then
+		return private.respond(p_session_id, 'game_not_active');
+	end if;
+	if v_session.mode <> 'fill_blanks' then
+		return private.respond(p_session_id, 'wrong_game_mode');
+	end if;
+	select * into v_game from public.games where session_id = p_session_id;
+
+	if p_round <> v_game.current_round or v_game.reveal_until is not null then
+		return private.respond(p_session_id, 'round_closed');
+	end if;
+	if exists (
+		select 1 from public.round_answers
+		where game_id = v_game.id and round = v_game.current_round and player_id = v_player.id
+	) then
+		return private.respond(p_session_id, 'already_answered');
+	end if;
+	if char_length(v_answer) < 1 or char_length(v_answer) > 60 or v_answer ~ '[[:cntrl:]]' then
+		return private.respond(p_session_id, 'invalid_answer');
+	end if;
+
+	select * into v_round from public.game_rounds where game_id = v_game.id and round = v_game.current_round;
+	select q.answer into v_correct_answer from public.grammar_questions q where q.id = v_round.question_id;
+
+	if v_player.level in ('beginner', 'elementary') and not exists (
+		select 1 from unnest(v_round.options) as o where o = v_answer
+	) then
+		return private.respond(p_session_id, 'invalid_answer');
+	end if;
+
+	v_correct := private.normalize_answer(v_answer) = private.normalize_answer(v_correct_answer);
+
+	insert into public.round_answers (game_id, round, player_id, answer, correct)
+	values (v_game.id, v_game.current_round, v_player.id, v_answer, v_correct);
+
+	if v_correct then
+		update public.players set score = score + 1 where id = v_player.id;
+	end if;
+
+	perform private.close_round_if_complete(v_game.id);
+	perform private.bump_revision(p_session_id);
+	return private.respond(p_session_id);
+end;
+$$;
+
+-- Host: move a stalled game on (spec 23.1). There is no turn timer, so this is
+-- how the host handles a player who is away.
+--   * Matchen: the active player's turn ends (a pending first flip turns back)
+--     and the next player's turn begins.
+--   * Fill in the Blanks: the current round closes now and its answer is shown;
+--     players who did not answer score nothing for it.
+create or replace function public.skip_turn(p_session_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+	v_uid uuid := auth.uid();
+	v_session public.game_sessions%rowtype;
+	v_game public.games%rowtype;
+begin
+	if v_uid is null then
+		return private.fail('not_authenticated');
+	end if;
+
+	select * into v_session from public.game_sessions where id = p_session_id for update;
+	if not found then
+		return private.fail('session_not_found');
+	end if;
+	if v_session.host_id <> v_uid then
+		return private.fail('not_host');
+	end if;
+	if v_session.status = 'completed' then
+		return private.respond(p_session_id, 'session_completed');
+	end if;
+	if v_session.status <> 'in_progress' then
+		return private.respond(p_session_id, 'game_not_active');
+	end if;
+
+	perform private.resolve_overdue(p_session_id);
+	select * into v_game from public.games where session_id = p_session_id;
+	if v_game.status <> 'active' then
+		return private.respond(p_session_id);
+	end if;
+
+	if v_session.mode = 'matchen' then
+		if v_game.mismatch_positions is not null then
+			-- The turn is already passing on.
+			return private.respond(p_session_id, 'reveal_pending');
+		end if;
+		insert into public.game_attempts (game_id, player_id, first_position, second_position, outcome)
+		values (v_game.id, v_game.active_player_id, v_game.first_flip, null, 'cancelled');
+		update public.games
+		set first_flip = null,
+			active_player_id = private.next_player(v_game.turn_order, v_game.active_player_id)
+		where id = v_game.id;
+	else
+		if v_game.reveal_until is not null then
+			-- Round already closed; the next one starts by itself.
+			return private.respond(p_session_id);
+		end if;
+		perform private.close_round(v_game.id);
+	end if;
+
 	perform private.bump_revision(p_session_id);
 	return private.respond(p_session_id);
 end;
@@ -1409,7 +1918,7 @@ begin
 	if v_session.status = 'in_progress' then
 		select * into v_game from public.games where session_id = p_session_id for update;
 
-		if v_game.status = 'active' and v_game.active_player_id = p_player_id then
+		if v_session.mode = 'matchen' and v_game.status = 'active' and v_game.active_player_id = p_player_id then
 			if v_game.first_flip is not null then
 				insert into public.game_attempts (game_id, player_id, first_position, second_position, outcome)
 				values (v_game.id, p_player_id, v_game.first_flip, null, 'cancelled');
@@ -1420,8 +1929,7 @@ begin
 				set first_flip = null,
 					mismatch_positions = null,
 					reveal_until = null,
-					active_player_id = v_next,
-					turn_until = now() + private.turn_time_limit()
+					active_player_id = v_next
 				where id = v_game.id;
 			end if;
 		end if;
@@ -1431,7 +1939,10 @@ begin
 		where session_id = p_session_id and status = 'active';
 
 		if v_active_count < 2 then
-			perform private.complete_game(p_session_id, 'not_enough_players', null);
+			perform private.complete_game(p_session_id, 'not_enough_players');
+		elsif v_session.mode = 'fill_blanks' then
+			-- The removed player may have been the last one still to answer.
+			perform private.close_round_if_complete(v_game.id);
 		end if;
 	end if;
 
@@ -1466,7 +1977,8 @@ begin
 	end if;
 
 	perform private.bump_revision(p_session_id);
-	-- Cascades to players, games, game_layout, board_cells, game_attempts, processed_actions.
+	-- Cascades to players, games, game_layout, game_rounds, round_answers,
+	-- game_attempts and processed_actions.
 	delete from public.game_sessions where id = p_session_id;
 
 	return jsonb_build_object('ok', true, 'error', null, 'view', null);
@@ -1481,25 +1993,32 @@ $$;
 -- avatar list used by a CHECK constraint.
 revoke execute on all functions in schema private from public, anon, authenticated;
 grant execute on function private.can_use_session_topic(text) to authenticated;
+-- Used by CHECK constraints (seed data is written by the owner or service_role).
 grant execute on function private.allowed_avatars() to service_role;
+grant execute on function private.valid_distractors(text, text[]) to service_role;
+grant execute on function private.normalize_answer(text) to service_role;
 
 -- Public RPCs: never callable by PUBLIC; anon only for lookup_session.
-revoke execute on function public.create_session(text, text, integer, timestamptz) from public, anon;
+revoke execute on function public.create_session(text, text, text, integer, integer, timestamptz) from public, anon;
 revoke execute on function public.lookup_session(text) from public;
 revoke execute on function public.join_session(text, text, text, text) from public, anon;
 revoke execute on function public.get_session_view(uuid) from public, anon;
 revoke execute on function public.start_game(uuid) from public, anon;
-revoke execute on function public.flip_card(uuid, uuid, integer, uuid, bigint) from public, anon;
+revoke execute on function public.flip_card(uuid, integer, uuid, bigint) from public, anon;
+revoke execute on function public.submit_answer(uuid, integer, text) from public, anon;
+revoke execute on function public.skip_turn(uuid) from public, anon;
 revoke execute on function public.end_game(uuid) from public, anon;
 revoke execute on function public.remove_player(uuid, uuid) from public, anon;
 revoke execute on function public.delete_session(uuid) from public, anon;
 
 grant execute on function public.lookup_session(text) to anon, authenticated;
-grant execute on function public.create_session(text, text, integer, timestamptz) to authenticated;
+grant execute on function public.create_session(text, text, text, integer, integer, timestamptz) to authenticated;
 grant execute on function public.join_session(text, text, text, text) to authenticated;
 grant execute on function public.get_session_view(uuid) to authenticated;
 grant execute on function public.start_game(uuid) to authenticated;
-grant execute on function public.flip_card(uuid, uuid, integer, uuid, bigint) to authenticated;
+grant execute on function public.flip_card(uuid, integer, uuid, bigint) to authenticated;
+grant execute on function public.submit_answer(uuid, integer, text) to authenticated;
+grant execute on function public.skip_turn(uuid) to authenticated;
 grant execute on function public.end_game(uuid) to authenticated;
 grant execute on function public.remove_player(uuid, uuid) to authenticated;
 grant execute on function public.delete_session(uuid) to authenticated;

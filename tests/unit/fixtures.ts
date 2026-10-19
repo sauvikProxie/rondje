@@ -62,16 +62,16 @@ export const pairs: PairDefinition[] = [
 export const T0 = 1_700_000_000_000;
 
 export function newGame(
-	options: { players?: string[]; variant?: Variant; pairCount?: PairCount; seed?: number } = {}
+	options: { players?: string[]; variant?: Variant; pairCount?: PairCount; groupCount?: number; seed?: number } = {}
 ): GameState {
 	return createGame({
 		variant: options.variant ?? 'word_image',
 		pairCount: options.pairCount ?? 6,
+		groupCount: options.groupCount ?? 1,
 		pairs,
 		items,
 		playerIds: options.players ?? ['anna', 'bram', 'cas'],
-		rng: seededRng(options.seed ?? 42),
-		now: T0
+		rng: seededRng(options.seed ?? 42)
 	});
 }
 

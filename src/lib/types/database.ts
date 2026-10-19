@@ -37,8 +37,10 @@ export type Database = {
 					name: string;
 					join_code: string;
 					scheduled_at: string | null;
-					variant: Database['public']['Enums']['game_variant'];
+					mode: Database['public']['Enums']['game_mode'];
+					variant: Database['public']['Enums']['game_variant'] | null;
 					pair_count: number;
+					group_count: number;
 					status: Database['public']['Enums']['session_status'];
 					revision: number;
 					created_at: string;
@@ -51,8 +53,10 @@ export type Database = {
 					name: string;
 					join_code: string;
 					scheduled_at?: string | null;
-					variant: Database['public']['Enums']['game_variant'];
+					mode?: Database['public']['Enums']['game_mode'];
+					variant?: Database['public']['Enums']['game_variant'] | null;
 					pair_count: number;
+					group_count?: number;
 					status?: Database['public']['Enums']['session_status'];
 					revision?: number;
 					created_at?: string;
@@ -65,8 +69,10 @@ export type Database = {
 					name?: string;
 					join_code?: string;
 					scheduled_at?: string | null;
-					variant?: Database['public']['Enums']['game_variant'];
+					mode?: Database['public']['Enums']['game_mode'];
+					variant?: Database['public']['Enums']['game_variant'] | null;
 					pair_count?: number;
+					group_count?: number;
 					status?: Database['public']['Enums']['session_status'];
 					revision?: number;
 					created_at?: string;
@@ -93,6 +99,7 @@ export type Database = {
 					level: Database['public']['Enums']['proficiency_level'];
 					status: Database['public']['Enums']['player_status'];
 					score: number;
+					group_number: number | null;
 					joined_at: string;
 					removed_at: string | null;
 				};
@@ -105,6 +112,7 @@ export type Database = {
 					level: Database['public']['Enums']['proficiency_level'];
 					status?: Database['public']['Enums']['player_status'];
 					score?: number;
+					group_number?: number | null;
 					joined_at?: string;
 					removed_at?: string | null;
 				};
@@ -117,6 +125,7 @@ export type Database = {
 					level?: Database['public']['Enums']['proficiency_level'];
 					status?: Database['public']['Enums']['player_status'];
 					score?: number;
+					group_number?: number | null;
 					joined_at?: string;
 					removed_at?: string | null;
 				};
@@ -227,9 +236,10 @@ export type Database = {
 					first_flip: number | null;
 					mismatch_positions: number[] | null;
 					reveal_until: string | null;
-					turn_until: string | null;
+					current_round: number | null;
 					end_reason: Database['public']['Enums']['game_end_reason'] | null;
 					winner_ids: string[];
+					winning_groups: number[];
 					started_at: string;
 					ended_at: string | null;
 				};
@@ -242,9 +252,10 @@ export type Database = {
 					first_flip?: number | null;
 					mismatch_positions?: number[] | null;
 					reveal_until?: string | null;
-					turn_until?: string | null;
+					current_round?: number | null;
 					end_reason?: Database['public']['Enums']['game_end_reason'] | null;
 					winner_ids?: string[];
+					winning_groups?: number[];
 					started_at?: string;
 					ended_at?: string | null;
 				};
@@ -257,9 +268,10 @@ export type Database = {
 					first_flip?: number | null;
 					mismatch_positions?: number[] | null;
 					reveal_until?: string | null;
-					turn_until?: string | null;
+					current_round?: number | null;
 					end_reason?: Database['public']['Enums']['game_end_reason'] | null;
 					winner_ids?: string[];
+					winning_groups?: number[];
 					started_at?: string;
 					ended_at?: string | null;
 				};
@@ -279,18 +291,24 @@ export type Database = {
 					position: number;
 					pair_id: string;
 					side: number;
+					matched_by: string | null;
+					matched_at: string | null;
 				};
 				Insert: {
 					game_id: string;
 					position: number;
 					pair_id: string;
 					side: number;
+					matched_by?: string | null;
+					matched_at?: string | null;
 				};
 				Update: {
 					game_id?: string;
 					position?: number;
 					pair_id?: string;
 					side?: number;
+					matched_by?: string | null;
+					matched_at?: string | null;
 				};
 				Relationships: [
 					{
@@ -302,24 +320,93 @@ export type Database = {
 					}
 				];
 			};
-			board_cells: {
+			grammar_questions: {
+				Row: {
+					id: string;
+					slug: string;
+					sentence: string;
+					answer: string;
+					distractors: string[];
+					translation: string;
+					topic: Database['public']['Enums']['grammar_topic'];
+					level: Database['public']['Enums']['proficiency_level'] | null;
+					active: boolean;
+					created_at: string;
+				};
+				Insert: {
+					id?: string;
+					slug: string;
+					sentence: string;
+					answer: string;
+					distractors: string[];
+					translation: string;
+					topic: Database['public']['Enums']['grammar_topic'];
+					level?: Database['public']['Enums']['proficiency_level'] | null;
+					active?: boolean;
+					created_at?: string;
+				};
+				Update: {
+					id?: string;
+					slug?: string;
+					sentence?: string;
+					answer?: string;
+					distractors?: string[];
+					translation?: string;
+					topic?: Database['public']['Enums']['grammar_topic'];
+					level?: Database['public']['Enums']['proficiency_level'] | null;
+					active?: boolean;
+					created_at?: string;
+				};
+				Relationships: [];
+			};
+			game_rounds: {
 				Row: {
 					game_id: string;
-					player_id: string;
-					position: number;
-					matched_at: string | null;
+					round: number;
+					question_id: string;
+					options: string[];
+					closed_at: string | null;
 				};
 				Insert: {
 					game_id: string;
-					player_id: string;
-					position: number;
-					matched_at?: string | null;
+					round: number;
+					question_id: string;
+					options: string[];
+					closed_at?: string | null;
 				};
 				Update: {
 					game_id?: string;
+					round?: number;
+					question_id?: string;
+					options?: string[];
+					closed_at?: string | null;
+				};
+				Relationships: [];
+			};
+			round_answers: {
+				Row: {
+					game_id: string;
+					round: number;
+					player_id: string;
+					answer: string;
+					correct: boolean;
+					answered_at: string;
+				};
+				Insert: {
+					game_id: string;
+					round: number;
+					player_id: string;
+					answer: string;
+					correct: boolean;
+					answered_at?: string;
+				};
+				Update: {
+					game_id?: string;
+					round?: number;
 					player_id?: string;
-					position?: number;
-					matched_at?: string | null;
+					answer?: string;
+					correct?: boolean;
+					answered_at?: string;
 				};
 				Relationships: [];
 			};
@@ -380,8 +467,10 @@ export type Database = {
 			create_session: {
 				Args: {
 					p_name: string;
-					p_variant: string;
+					p_mode: string;
+					p_variant: string | null;
 					p_pair_count: number;
+					p_group_count?: number;
 					p_scheduled_at?: string | null;
 				};
 				Returns: Json;
@@ -410,11 +499,18 @@ export type Database = {
 			flip_card: {
 				Args: {
 					p_session_id: string;
-					p_board_player_id: string;
 					p_position: number;
 					p_action_id: string;
 					p_revision: number;
 				};
+				Returns: Json;
+			};
+			submit_answer: {
+				Args: { p_session_id: string; p_round: number; p_answer: string };
+				Returns: Json;
+			};
+			skip_turn: {
+				Args: { p_session_id: string };
 				Returns: Json;
 			};
 			end_game: {
@@ -446,7 +542,17 @@ export type Database = {
 				| 'weer'
 				| 'familie';
 			game_status: 'active' | 'completed';
-			game_end_reason: 'board_cleared' | 'ended_by_host' | 'not_enough_players';
+			game_end_reason: 'board_cleared' | 'ended_by_host' | 'not_enough_players' | 'all_rounds_played';
+			game_mode: 'matchen' | 'fill_blanks';
+			grammar_topic:
+				| 'verbs'
+				| 'articles'
+				| 'prepositions'
+				| 'pronouns'
+				| 'adjectives'
+				| 'plurals'
+				| 'past_tense'
+				| 'word_order';
 			attempt_outcome: 'match' | 'mismatch' | 'timeout' | 'cancelled';
 		};
 		CompositeTypes: {

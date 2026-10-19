@@ -1,4 +1,3 @@
-import { TURN_TIME_LIMIT_MS } from './constants';
 import type { GameErrorCode, GameState } from './types';
 
 /**
@@ -27,34 +26,22 @@ export interface FlipContext {
 	revealPending: boolean;
 	firstFlip: number | null;
 	cardCount: number;
-	/** Matched positions on the flipping player's own board. */
+	/** Matched positions on the shared board. */
 	matched: ReadonlySet<number>;
 }
 
 export type FlipRuleError = Extract<
 	GameErrorCode,
-	| 'game_not_active'
-	| 'not_your_board'
-	| 'not_your_turn'
-	| 'reveal_pending'
-	| 'invalid_position'
-	| 'already_matched'
-	| 'already_flipped'
+	'game_not_active' | 'not_your_turn' | 'reveal_pending' | 'invalid_position' | 'already_matched' | 'already_flipped'
 >;
 
 /**
- * Flip validation rules (spec 8.3, 9.2), in the same order as public.flip_card().
- * Used by the engine and by the client to disable cards; the server always
- * re-validates.
+ * Flip validation rules (spec 8.3, 9.2, 23.2), in the same order as
+ * public.flip_card(). Used by the engine and by the client to disable cards;
+ * the server always re-validates.
  */
-export function checkFlip(
-	ctx: FlipContext,
-	playerId: string,
-	boardPlayerId: string,
-	position: number
-): FlipRuleError | null {
+export function checkFlip(ctx: FlipContext, playerId: string, position: number): FlipRuleError | null {
 	if (!ctx.gameActive) return 'game_not_active';
-	if (boardPlayerId !== playerId) return 'not_your_board';
 	if (ctx.activePlayerId !== playerId) return 'not_your_turn';
 	if (ctx.revealPending) return 'reveal_pending';
 	if (!Number.isInteger(position) || position < 0 || position >= ctx.cardCount) return 'invalid_position';
@@ -68,56 +55,25 @@ export function isPlayerActive(state: GameState, playerId: string): boolean {
 }
 
 /**
- * Lazily resolve an overdue mismatch reveal or turn deadline (spec 9.4, 9.6),
- * mirroring private.resolve_overdue(): at most one transition per call, and
- * the new deadline is always in the future, so repeated calls with the same
- * `now` are no-ops. Returns the same object when nothing changed.
+ * Lazily resolve an overdue mismatch reveal (spec 9.4), mirroring the Matchen
+ * branch of private.resolve_overdue(): once the reveal has ended the cards
+ * turn face down and the turn passes on. There is no turn timer (spec 23.1),
+ * so nothing else ever expires. Returns the same object when nothing changed.
  */
 export function resolveOverdue(state: GameState, now: number): GameState {
-	if (state.status !== 'active') return state;
-	const next = () => nextPlayer(state.turnOrder, state.activePlayerId, (id) => isPlayerActive(state, id));
-
-	if (state.mismatch !== null) {
-		if (state.revealUntil !== null && now < state.revealUntil) return state;
-		// Reveal finished: cards turn face down, the turn passes on.
-		return {
-			...state,
-			mismatch: null,
-			revealUntil: null,
-			activePlayerId: next(),
-			turnUntil: now + TURN_TIME_LIMIT_MS,
-			revision: state.revision + 1
-		};
-	}
-
-	if (state.turnUntil !== null && now >= state.turnUntil) {
-		// Deadline passed: a pending first flip turns back, the turn passes on.
-		return {
-			...state,
-			attempts: [
-				...state.attempts,
-				{
-					playerId: state.activePlayerId!,
-					firstPosition: state.firstFlip,
-					secondPosition: null,
-					outcome: 'timeout',
-					at: now
-				}
-			],
-			firstFlip: null,
-			activePlayerId: next(),
-			turnUntil: now + TURN_TIME_LIMIT_MS,
-			revision: state.revision + 1
-		};
-	}
-
-	return state;
+	if (state.status !== 'active' || state.mismatch === null) return state;
+	if (state.revealUntil !== null && now < state.revealUntil) return state;
+	return {
+		...state,
+		mismatch: null,
+		revealUntil: null,
+		activePlayerId: nextPlayer(state.turnOrder, state.activePlayerId, (id) => isPlayerActive(state, id)),
+		revision: state.revision + 1
+	};
 }
 
-/** The next deadline (reveal end or turn end) a client should refetch at, if any. */
-export function nextDeadline(
-	state: Pick<GameState, 'status' | 'revealUntil' | 'turnUntil'>
-): number | null {
+/** The next deadline (end of a reveal) a client should refetch at, if any. */
+export function nextDeadline(state: Pick<GameState, 'status' | 'revealUntil'>): number | null {
 	if (state.status !== 'active') return null;
-	return state.revealUntil ?? state.turnUntil;
+	return state.revealUntil;
 }

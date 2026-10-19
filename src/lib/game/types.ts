@@ -42,8 +42,8 @@ export interface PlayerState {
 	id: string;
 	status: PlayerStatus;
 	score: number;
-	/** Matched positions on this player's own board. */
-	matched: number[];
+	/** Group number (1-based) when the game uses groups, else null. */
+	group: number | null;
 }
 
 export type AttemptOutcome = 'match' | 'mismatch' | 'timeout' | 'cancelled';
@@ -63,20 +63,24 @@ export interface Attempt {
 export interface GameState {
 	status: 'active' | 'completed';
 	pairCount: PairCount;
-	/** The single shared layout; every player's board references it. */
+	/** 1 = no groups. */
+	groupCount: number;
+	/** The single shared board everyone plays on. */
 	layout: LayoutCard[];
+	/** Matched position -> player who found the pair. */
+	matchedBy: Record<number, string>;
 	turnOrder: string[];
 	players: Record<string, PlayerState>;
 	activePlayerId: string | null;
 	firstFlip: number | null;
 	mismatch: [number, number] | null;
 	revealUntil: number | null;
-	turnUntil: number | null;
 	revision: number;
 	processedActions: string[];
 	attempts: Attempt[];
 	endReason: EndReason | null;
 	winnerIds: string[];
+	winningGroups: number[];
 }
 
 export type GameErrorCode =
@@ -85,7 +89,6 @@ export type GameErrorCode =
 	| 'duplicate_action'
 	| 'game_not_active'
 	| 'stale_state'
-	| 'not_your_board'
 	| 'not_your_turn'
 	| 'reveal_pending'
 	| 'invalid_position'
@@ -94,6 +97,7 @@ export type GameErrorCode =
 	| 'player_not_found'
 	| 'session_completed'
 	| 'not_enough_players'
+	| 'not_enough_players_for_groups'
 	| 'not_enough_vocabulary';
 
 /**

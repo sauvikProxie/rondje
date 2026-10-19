@@ -27,9 +27,10 @@ const DEADLINE_GRACE_MS = 250;
  *   replaces a newer one (duplicate, delayed or out-of-order responses).
  * - Realtime broadcasts contain only {session_id, revision} and simply
  *   trigger a refetch when they announce a newer revision.
- * - Deadlines (mismatch reveal, turn time limit) are persisted with the
- *   database clock; the client schedules a refetch at the deadline and the
- *   server decides whether it has passed.
+ * - Reveal deadlines (Matchen mismatch, Fill in the Blanks answer) are
+ *   persisted with the database clock; the client schedules a refetch at the
+ *   deadline and the server decides whether it has passed. There is no turn
+ *   timer.
  * - Reconnection, tab visibility changes and network recovery all refetch.
  */
 export class SessionSync {
@@ -40,8 +41,8 @@ export class SessionSync {
 	notice = $state<{ code: ErrorCode; message: string; at: number } | null>(null);
 	busy = $state(false);
 	pendingFlip = $state<number | null>(null);
-	/** Server-adjusted clock, ticking while a game is active (for countdowns). */
-	now = $state(Date.now());
+	/** Answer being submitted for the current Fill in the Blanks round. */
+	pendingAnswer = $state<string | null>(null);
 
 	readonly sessionId: string;
 	private readonly presenceKey: string;
@@ -49,7 +50,6 @@ export class SessionSync {
 	private channel: RealtimeChannel | null = null;
 	private deadlineTimer: ReturnType<typeof setTimeout> | undefined;
 	private pollTimer: ReturnType<typeof setInterval> | undefined;
-	private tickTimer: ReturnType<typeof setInterval> | undefined;
 	private noticeTimer: ReturnType<typeof setTimeout> | undefined;
 	private refreshing: Promise<void> | null = null;
 	private refreshQueued = false;
@@ -71,7 +71,6 @@ export class SessionSync {
 		const serverNow = Date.parse(next.server_now);
 		if (!Number.isNaN(serverNow)) this.offsetMs = serverNow - Date.now();
 		this.view = next;
-		this.now = this.serverNow();
 		this.scheduleDeadline();
 		return true;
 	}
@@ -112,15 +111,26 @@ export class SessionSync {
 		}
 	}
 
-	/** Flip one card on the caller's own board. */
+	/** Matchen: flip one card on the shared board. */
 	async flip(position: number): Promise<void> {
-		const me = this.view.me;
-		if (!me || this.pendingFlip !== null) return;
+		if (!this.view.me || this.pendingFlip !== null) return;
 		this.pendingFlip = position;
 		try {
-			await this.act('flip', { boardPlayerId: me, position, actionId: uuid(), revision: this.view.revision });
+			await this.act('flip', { position, actionId: uuid(), revision: this.view.revision });
 		} finally {
 			this.pendingFlip = null;
+		}
+	}
+
+	/** Fill in the Blanks: answer the current round. Returns whether it was accepted. */
+	async answer(text: string): Promise<boolean> {
+		const round = this.view.game?.round;
+		if (!this.view.me || !round || this.pendingAnswer !== null) return false;
+		this.pendingAnswer = text;
+		try {
+			return (await this.act('answer', { round: round.index, answer: text })).ok;
+		} finally {
+			this.pendingAnswer = null;
 		}
 	}
 
@@ -144,9 +154,6 @@ export class SessionSync {
 		window.addEventListener('offline', onOffline);
 		window.addEventListener('pageshow', onVisible);
 
-		this.tickTimer = setInterval(() => {
-			if (this.view.game?.status === 'active') this.now = this.serverNow();
-		}, 250);
 		let lastPoll = Date.now();
 		this.pollTimer = setInterval(() => {
 			if (document.visibilityState !== 'visible') return;
@@ -168,7 +175,6 @@ export class SessionSync {
 			clearTimeout(this.deadlineTimer);
 			clearTimeout(this.noticeTimer);
 			clearInterval(this.pollTimer);
-			clearInterval(this.tickTimer);
 			this.disconnectRealtime();
 		};
 	}
@@ -251,7 +257,7 @@ export class SessionSync {
 		clearTimeout(this.deadlineTimer);
 		const game = this.view.game;
 		if (this.stopped || !game || game.status !== 'active') return;
-		const deadline = game.reveal_until ?? game.turn_until;
+		const deadline = game.reveal_until;
 		if (!deadline) return;
 		const delay = Math.max(0, Date.parse(deadline) - this.serverNow()) + DEADLINE_GRACE_MS;
 		this.deadlineTimer = setTimeout(() => void this.refresh(), delay);

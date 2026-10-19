@@ -1,8 +1,14 @@
 # Rondje
 
-A browser-based, multiplayer memory game for practising Dutch vocabulary. A
-host creates a session and shares a code, QR code or link. Players join with a
-nickname and emoji avatar, then take turns flipping cards on identical boards.
+A browser-based, multiplayer game for practising Dutch. A host creates a
+session and shares a code, QR code or link. Players join with a nickname,
+emoji avatar and level, then play one of two games, alone or in groups:
+
+- **Matchen**: a memory game on one shared board (four variants). Players
+  take turns; found pairs stay face up for everyone.
+- **Fill in the Blanks**: everyone completes the same grammar sentence at
+  once. Beginner/Elementary players choose from four options;
+  Intermediate/Advanced players type the answer.
 
 The product and technical specification is [`docs/rondje-spec.md`](docs/rondje-spec.md);
 the rebuild log is [`docs/PROGRESS.md`](docs/PROGRESS.md).
@@ -21,8 +27,9 @@ for database and security tests.
 
 - **The database is authoritative.** Every state change goes through a
   `SECURITY DEFINER` PostgreSQL function in `supabase/schema.sql`
-  (`create_session`, `join_session`, `start_game`, `flip_card`, `end_game`,
-  `remove_player`, `get_session_view`). Each one identifies the caller with
+  (`create_session`, `join_session`, `start_game`, `flip_card`,
+  `submit_answer`, `skip_turn`, `end_game`, `remove_player`,
+  `delete_session`, `get_session_view`). Each one identifies the caller with
   `auth.uid()` from their JWT, locks the session row, validates the request and
   applies the transition atomically. Business errors are returned as
   `{ok:false, error}`, not raised.
@@ -32,15 +39,19 @@ for database and security tests.
 - **Hidden cards stay hidden.** The board layout is stored once per game in
   `game_layout`, which no client role can read. Clients receive only their
   authorised view: card content for positions that are flipped in the current
-  attempt or already matched. Card identifiers are plain board positions.
+  attempt or already matched. Card identifiers are plain board positions. A
+  Fill in the Blanks answer is sent only once its round has closed.
 - **Realtime carries only notifications.** After each change the database sends
   `{session_id, revision}` on the private channel `session:<id>`. Clients
   refetch their view and never apply an older revision over a newer one.
   Presence on the same channel shows who is online.
-- **Timing is safe on serverless hosting.** Mismatch reveals (2.5 s) and turn
-  limits (60 s) are stored as database-clock deadlines (`reveal_until`,
-  `turn_until`). They are resolved lazily and idempotently by the next read or
-  action. Clients schedule a refetch at each deadline.
+- **No turn timer.** The only timed transitions are short reveals (2.5 s
+  Matchen mismatch, 4 s Fill in the Blanks answer), stored as a database-clock
+  deadline (`reveal_until`) and resolved lazily and idempotently by the next
+  read or action. Clients schedule a refetch at the deadline. The host can
+  skip a stalled turn or close a round.
+- **Groups** (optional, 2–4) are dealt at game start; each group has its own
+  scorecard and groups are ranked by points per member.
 - **The pure game engine** in `src/lib/game/` mirrors the SQL rules for unit
   tests. The UI reuses it to disable cards that can't be flipped and to compute
   rankings.
@@ -57,8 +68,9 @@ for database and security tests.
 | `/join/[code]` | Validate the session, then onboarding (nickname, avatar, level) |
 | `/session/[code]` | Player view: lobby, then game, then results |
 | `/api/sessions/[id]/state` | `GET` the caller's authorised view (resolves overdue deadlines) |
-| `/api/sessions/[id]/flip` | `POST {boardPlayerId, position, actionId, revision}` |
-| `/api/sessions/[id]/start`, `/end`, `/delete` | Host actions (`/delete` permanently removes the session and all its data) |
+| `/api/sessions/[id]/flip` | Matchen: `POST {position, actionId, revision}` |
+| `/api/sessions/[id]/answer` | Fill in the Blanks: `POST {round, answer}` |
+| `/api/sessions/[id]/start`, `/end`, `/skip`, `/delete` | Host actions (`/skip` passes a stalled turn on or closes the current round; `/delete` permanently removes the session and all its data) |
 | `/api/sessions/[id]/players/[playerId]/remove` | Host removes a participant |
 
 ## Prerequisites
@@ -104,9 +116,12 @@ them. Pages that need Supabase show a friendly "not configured" or
    psql "$DATABASE_URL" -f supabase/schema.sql
    psql "$DATABASE_URL" -f supabase/seed.sql
    ```
-   Both scripts are written for a fresh project and are safe to re-run
-   (create-if-not-exists, `on conflict do nothing`). They do not drop or migrate
-   existing data.
+   Both scripts are safe to re-run (create-if-not-exists, `on conflict do
+   nothing`). Re-running them on a project with an earlier version of the
+   schema upgrades it in place (shared board, no turn timer, groups, Fill in
+   the Blanks); see "Upgrades" in `schema.sql`. Finish running games before
+   upgrading. No tables or rows are dropped; the unused `board_cells` table can
+   be removed by hand afterwards.
 3. **Dashboard settings that cannot be set from SQL:**
    - **Authentication → Sign In / Providers → Allow anonymous sign-ins:
      enable.** Players join as anonymous users.
@@ -150,8 +165,9 @@ npx playwright install chromium   # once
 npm run test:e2e     # Playwright: responsive checks + multiplayer journey
 ```
 
-- **`tests/unit`** covers board generation, all four variants, turns,
-  deadlines, removal, scoring and completion, using the pure engine.
+- **`tests/unit`** covers board generation, all four variants, the shared
+  board, turns, reveals, host skip, removal, scoring, groups and Fill in the
+  Blanks answer rules, using the pure engine.
 - **`tests/db`** loads the real `supabase/schema.sql` and `seed.sql` into
   PGlite, with a small stand-in for Supabase's `auth` and `realtime` schemas and
   the `anon`/`authenticated` roles. It exercises every RPC, RLS policy, grant
@@ -162,9 +178,12 @@ npm run test:e2e     # Playwright: responsive checks + multiplayer journey
   desktop. App pages come from the production build. The lobby, game and results
   screens are rendered by a test-only harness (`tests/visual`, its own Vite
   server on port 4174) with fixture views. No Supabase is required.
-- **`tests/e2e/multiplayer.spec.ts`** is the full journey from spec 19.3: host
-  sign-in, session creation, three players in separate browser contexts, a
-  match, a miss, a board clear, synchronised results, and refresh. It needs
+- **`tests/e2e/multiplayer.spec.ts`** has two journeys. Matchen (spec 19.3):
+  host sign-in, session creation, three players in separate browser contexts,
+  a match, a miss after which the matched pair stays face up for everyone, the
+  board cleared, synchronised results, and refresh. Fill in the Blanks with two
+  groups: a choosing and a typing player, the reveal, the host closing a round,
+  and group results. It needs
   `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` and
   `SUPABASE_SECRET_KEY` for a project with the schema and seed applied and
   anonymous sign-ins enabled; it is skipped otherwise. It creates a confirmed
@@ -213,7 +232,8 @@ src/
 └── routes/                    see the routes table above
 supabase/
 ├── schema.sql                 tables, constraints, indexes, RLS, grants, realtime policies, functions
-└── seed.sql                   80 nouns (8 themes) → 80 pairs each for 3 variants; 20 opposite pairs
+└── seed.sql                   80 nouns (8 themes) → 80 pairs each for 3 variants; 20 opposite pairs;
+                               47 grammar sentences for Fill in the Blanks
 tests/
 ├── unit/                      engine tests
 ├── db/                        PGlite harness, game-function tests, security tests

@@ -33,9 +33,11 @@ const PROTECTED_TABLES = [
 	'public.vocabulary_items',
 	'public.vocabulary_pairs',
 	'public.games',
-	'public.board_cells',
 	'public.game_attempts',
-	'public.processed_actions'
+	'public.processed_actions',
+	'public.grammar_questions',
+	'public.game_rounds',
+	'public.round_answers'
 ];
 
 describe('direct table access', () => {
@@ -63,7 +65,9 @@ describe('direct table access', () => {
 			`update public.players set score = 99 where id = '${p.playerId}'`,
 			`insert into public.players (session_id, user_id, nickname, avatar, level) values ('${g.sessionId}', '${p.user.id}', 'x', '🦊', 'beginner')`,
 			`update public.games set active_player_id = '${p.playerId}'`,
-			`update public.board_cells set matched_at = now() where player_id = '${p.playerId}'`,
+			`update public.game_layout set matched_by = '${p.playerId}', matched_at = now()`,
+			`update public.players set group_number = 1 where id = '${p.playerId}'`,
+			`insert into public.round_answers (game_id, round, player_id, answer, correct) select id, 0, '${p.playerId}', 'x', true from public.games limit 1`,
 			`update public.game_sessions set status = 'completed' where id = '${g.sessionId}'`,
 			`delete from public.players where id = '${g.waiting.playerId}'`,
 			`insert into public.processed_actions (action_id, game_id, player_id) select gen_random_uuid(), id, '${p.playerId}' from public.games limit 1`
@@ -89,6 +93,9 @@ describe('direct table access', () => {
 			['get_session_view', { p_session_id: g.sessionId }],
 			['start_game', { p_session_id: g.sessionId }],
 			['end_game', { p_session_id: g.sessionId }],
+			['skip_turn', { p_session_id: g.sessionId }],
+			['submit_answer', { p_session_id: g.sessionId, p_round: 0, p_answer: 'x' }],
+			['flip_card', { p_session_id: g.sessionId, p_position: 0, p_action_id: crypto.randomUUID(), p_revision: 1 }],
 			['join_session', { p_join_code: g.joinCode, p_nickname: 'x', p_avatar: '🦊', p_level: 'beginner' }]
 		] as const) {
 			await expect(db.rpc(null, fn, args), fn).rejects.toThrow(/permission denied/);
@@ -107,7 +114,7 @@ describe('direct table access', () => {
 });
 
 describe('player authorisation', () => {
-	test('players cannot start or end the game, or remove other players', async () => {
+	test('players cannot start or end the game, skip turns, or remove other players', async () => {
 		const host = await db.createHost();
 		const { sessionId, joinCode } = await db.createSession(host);
 		const a = await db.join(joinCode, 'A');
@@ -116,16 +123,15 @@ describe('player authorisation', () => {
 		expect((await db.rpc(a.user, 'remove_player', { p_session_id: sessionId, p_player_id: b.playerId })).error).toBe('not_host');
 		await db.rpc(host, 'start_game', { p_session_id: sessionId });
 		expect((await db.rpc(a.user, 'end_game', { p_session_id: sessionId })).error).toBe('not_host');
+		expect((await db.rpc(b.user, 'skip_turn', { p_session_id: sessionId })).error).toBe('not_host');
 		const [s] = await db.sql<{ status: string }>('select status from public.game_sessions where id = $1', [sessionId]);
 		expect(s!.status).toBe('in_progress');
 	});
 
-	test('a player cannot play out of turn or flip on another player’s board', async () => {
+	test('a player cannot play out of turn', async () => {
 		const g = await game();
 		const before = await db.revision(g.sessionId);
-		expect((await db.flip(g.waiting.user, g.sessionId, g.waiting.playerId, 0)).error).toBe('not_your_turn');
-		expect((await db.flip(g.active.user, g.sessionId, g.waiting.playerId, 0)).error).toBe('not_your_board');
-		expect((await db.flip(g.waiting.user, g.sessionId, g.active.playerId, 0)).error).toBe('not_your_board');
+		expect((await db.flip(g.waiting.user, g.sessionId, 0)).error).toBe('not_your_turn');
 		expect(await db.revision(g.sessionId)).toBe(before);
 	});
 
@@ -133,7 +139,8 @@ describe('player authorisation', () => {
 		const g = await game();
 		const stranger = await db.createUser();
 		expect((await db.rpc(stranger, 'get_session_view', { p_session_id: g.sessionId })).error).toBe('forbidden');
-		expect((await db.flip(stranger, g.sessionId, g.active.playerId, 0)).error).toBe('forbidden');
+		expect((await db.flip(stranger, g.sessionId, 0)).error).toBe('forbidden');
+		expect((await db.answer(stranger, g.sessionId, 'x', 0)).error).toBe('forbidden');
 	});
 
 	test('removed participants cannot continue participating', async () => {
@@ -141,7 +148,7 @@ describe('player authorisation', () => {
 		await db.rpc(g.host, 'remove_player', { p_session_id: g.sessionId, p_player_id: g.waiting.playerId });
 		const removed = g.waiting;
 		expect((await db.rpc(removed.user, 'get_session_view', { p_session_id: g.sessionId })).error).toBe('removed');
-		expect((await db.flip(removed.user, g.sessionId, removed.playerId, 0)).error).toBe('removed');
+		expect((await db.flip(removed.user, g.sessionId, 0)).error).toBe('removed');
 		const rejoin = await db.rpc(removed.user, 'join_session', {
 			p_join_code: g.joinCode, p_nickname: 'Again', p_avatar: '🐢', p_level: 'beginner'
 		});
@@ -152,9 +159,9 @@ describe('player authorisation', () => {
 	test('a completed game rejects additional scoring actions', async () => {
 		const g = await game();
 		const pairs = await db.matchingPairs(g.sessionId);
-		await db.flip(g.active.user, g.sessionId, g.active.playerId, pairs[0]![0]);
+		await db.flip(g.active.user, g.sessionId, pairs[0]![0]);
 		await db.rpc(g.host, 'end_game', { p_session_id: g.sessionId });
-		const late = await db.flip(g.active.user, g.sessionId, g.active.playerId, pairs[0]![1]);
+		const late = await db.flip(g.active.user, g.sessionId, pairs[0]![1]);
 		expect(late.error).toBe('game_not_active');
 		const [row] = await db.sql<{ score: number }>('select score from public.players where id = $1', [g.active.playerId]);
 		expect(row!.score).toBe(0);
@@ -192,9 +199,9 @@ describe('hidden card content', () => {
 		const g = await game(2, 'word_image');
 		const pairs = await db.matchingPairs(g.sessionId);
 		// Match one pair, then flip one card of another pair.
-		await db.flip(g.active.user, g.sessionId, g.active.playerId, pairs[0]![0]);
-		await db.flip(g.active.user, g.sessionId, g.active.playerId, pairs[0]![1]);
-		await db.flip(g.active.user, g.sessionId, g.active.playerId, pairs[1]![0]);
+		await db.flip(g.active.user, g.sessionId, pairs[0]![0]);
+		await db.flip(g.active.user, g.sessionId, pairs[0]![1]);
+		await db.flip(g.active.user, g.sessionId, pairs[1]![0]);
 		const expectedVisible = [pairs[0]![0], pairs[0]![1], pairs[1]![0]].sort((a, b) => a - b);
 
 		for (const viewer of [g.host, g.active.user, g.waiting.user]) {
@@ -227,8 +234,8 @@ describe('hidden card content', () => {
 	test('after a mismatch reveal ends, the two cards are hidden again', async () => {
 		const g = await game();
 		const pairs = await db.matchingPairs(g.sessionId);
-		await db.flip(g.active.user, g.sessionId, g.active.playerId, pairs[0]![0]);
-		await db.flip(g.active.user, g.sessionId, g.active.playerId, pairs[1]![0]);
+		await db.flip(g.active.user, g.sessionId, pairs[0]![0]);
+		await db.flip(g.active.user, g.sessionId, pairs[1]![0]);
 		const during = await db.rpc(g.waiting.user, 'get_session_view', { p_session_id: g.sessionId });
 		expect(Object.keys(during.view!.game.faces)).toHaveLength(2);
 		await db.expireDeadlines(g.sessionId);
@@ -240,9 +247,38 @@ describe('hidden card content', () => {
 		const g = await game();
 		const res = await db.rpc(null, 'lookup_session', { p_join_code: g.joinCode });
 		expect(Object.keys(res.session).sort()).toEqual(
-			['id', 'join_code', 'name', 'pair_count', 'scheduled_at', 'status', 'variant'].sort()
+			['group_count', 'id', 'join_code', 'mode', 'name', 'pair_count', 'scheduled_at', 'status', 'variant'].sort()
 		);
 		expect(res).not.toHaveProperty('view');
+	});
+
+	test('Fill in the Blanks: no view contains the answer or the distractors list before the round closes', async () => {
+		const host = await db.createHost();
+		const { sessionId, joinCode } = await db.createBlanksSession(host);
+		const chooser = await db.join(joinCode, 'Kiezer', '🦊', 'beginner');
+		const typer = await db.join(joinCode, 'Typer', '🐼', 'advanced');
+		await db.rpc(host, 'start_game', { p_session_id: sessionId });
+		const [q] = await db.sql<{ answer: string; id: string }>(
+			`select q.answer, q.id from public.games g
+			 join public.game_rounds r on r.game_id = g.id and r.round = g.current_round
+			 join public.grammar_questions q on q.id = r.question_id where g.session_id = $1`,
+			[sessionId]
+		);
+		// The chooser answers; the round is still open for the typer.
+		await db.answer(chooser.user, sessionId, q!.answer);
+		for (const viewer of [host, typer.user]) {
+			const json = JSON.stringify((await db.rpc(viewer, 'get_session_view', { p_session_id: sessionId })).view);
+			expect(json).not.toContain(q!.id);
+			expect(json).not.toMatch(/distractors|question_id|"correct"/);
+			if (viewer === typer.user) expect(json).not.toContain(`"${q!.answer}"`);
+			const round = JSON.parse(json).game.round;
+			expect(round.correct_answer).toBeNull();
+			expect(round.results).toBeNull();
+		}
+		// The typer cannot see the chooser's answer either (only that they answered).
+		const typerView = (await db.rpc(typer.user, 'get_session_view', { p_session_id: sessionId })).view!;
+		expect(typerView.game.round.answered).toEqual([chooser.playerId]);
+		expect(typerView.game.round.my_answer).toBeNull();
 	});
 });
 

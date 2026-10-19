@@ -10,6 +10,10 @@
 --     de_het       (emoji + article and noun)  e.g. 🏠 + "het huis"
 -- * Opposites are a general set (not tied to themes): 20 explicit pairs, each
 --   word used in exactly one pair.
+-- * Fill in the Blanks: grammar sentences with one blank ("___"). Where the
+--   blank needs a specific word form, the base form is given in brackets so a
+--   typed answer has exactly one correct form. The three distractors are
+--   always wrong in that sentence.
 -- Re-runnable: existing rows are left untouched.
 -- =============================================================================
 
@@ -201,3 +205,70 @@ from (
 join public.vocabulary_items a on a.slug = o.slug_a
 join public.vocabulary_items b on b.slug = o.slug_b
 on conflict (variant, item_a, item_b) do nothing;
+
+-- Fill in the Blanks: grammar sentences.
+insert into public.grammar_questions (slug, sentence, answer, distractors, translation, topic, level)
+values
+	-- Verbs: present tense
+	('verb_werken', 'Ik ___ (werken) in een ziekenhuis.', 'werk', array['werkt', 'werken', 'gewerkt'], 'I work in a hospital.', 'verbs', 'beginner'),
+	('verb_wonen', 'Jij ___ (wonen) in Utrecht, toch?', 'woont', array['woon', 'wonen', 'gewoond'], 'You live in Utrecht, right?', 'verbs', 'beginner'),
+	('verb_spreken', 'Wij ___ (spreken) een beetje Nederlands.', 'spreken', array['spreek', 'spreekt', 'gesproken'], 'We speak a little Dutch.', 'verbs', 'beginner'),
+	('verb_hebben', 'Mijn zus ___ (hebben) twee kinderen.', 'heeft', array['hebt', 'heb', 'hebben'], 'My sister has two children.', 'verbs', 'beginner'),
+	('verb_zijn', '___ (zijn) jullie morgen thuis?', 'Zijn', array['Is', 'Ben', 'Bent'], 'Are you (all) at home tomorrow?', 'verbs', 'beginner'),
+	('verb_kunnen', 'Hij ___ (kunnen) goed koken.', 'kan', array['kunt', 'kunnen', 'kant'], 'He can cook well.', 'verbs', 'elementary'),
+	('verb_komen', 'Wanneer ___ (komen) jij naar het feest?', 'kom', array['komt', 'komen', 'gekomen'], 'When are you coming to the party?', 'verbs', 'elementary'),
+	('verb_gaan', 'De kinderen ___ (gaan) met de trein naar school.', 'gaan', array['gaat', 'ga', 'gegaan'], 'The children go to school by train.', 'verbs', 'beginner'),
+
+	-- Articles: de or het
+	('article_kinderen', '___ kinderen spelen in de tuin.', 'De', array['Het', 'Een', 'Dit'], 'The children are playing in the garden.', 'articles', 'beginner'),
+	('article_boek', 'Ik lees ___ boek over Amsterdam.', 'het', array['de', 'den', 'deze'], 'I am reading the book about Amsterdam.', 'articles', 'beginner'),
+	('article_meisje', '___ meisje heeft een rode fiets.', 'Het', array['De', 'Deze', 'Den'], 'The girl has a red bike.', 'articles', 'elementary'),
+	('article_station', 'Waar is ___ station?', 'het', array['de', 'den', 'deze'], 'Where is the station?', 'articles', 'beginner'),
+	('article_weer', '___ weer is vandaag mooi.', 'Het', array['De', 'Deze', 'Den'], 'The weather is nice today.', 'articles', 'elementary'),
+	('article_man', 'Hoe heet ___ man naast jou?', 'de', array['het', 'dit', 'den'], 'What is the name of the man next to you?', 'articles', 'elementary'),
+
+	-- Prepositions
+	('prep_wonen_in', 'Ik woon ___ Nederland.', 'in', array['op', 'aan', 'naar'], 'I live in the Netherlands.', 'prepositions', 'beginner'),
+	('prep_liggen_op', 'Het boek ligt ___ de tafel.', 'op', array['aan', 'naar', 'uit'], 'The book is on the table.', 'prepositions', 'beginner'),
+	('prep_gaan_naar', 'We gaan morgen ___ de supermarkt.', 'naar', array['in', 'op', 'aan'], 'We are going to the supermarket tomorrow.', 'prepositions', 'beginner'),
+	('prep_wachten_op', 'Ik wacht ___ de bus.', 'op', array['aan', 'naar', 'in'], 'I am waiting for the bus.', 'prepositions', 'elementary'),
+	('prep_bang_voor', 'Ze is bang ___ honden.', 'voor', array['op', 'aan', 'naar'], 'She is afraid of dogs.', 'prepositions', 'intermediate'),
+	('prep_denken_aan', 'Ik denk vaak ___ mijn familie.', 'aan', array['op', 'naar', 'bij'], 'I often think of my family.', 'prepositions', 'intermediate'),
+	('prep_om_uur', 'De les begint ___ negen uur.', 'om', array['op', 'in', 'aan'], 'The lesson starts at nine o''clock.', 'prepositions', 'elementary'),
+
+	-- Pronouns
+	('pron_hij', 'Mijn broer is ziek. ___ blijft vandaag thuis.', 'Hij', array['Hem', 'Zijn', 'Haar'], 'My brother is ill. He is staying at home today.', 'pronouns', 'beginner'),
+	('pron_hem_telefoon', 'Waar is mijn telefoon? Ik kan ___ niet vinden.', 'hem', array['het', 'hij', 'zijn'], 'Where is my phone? I can''t find it.', 'pronouns', 'intermediate'),
+	('pron_mijn', 'Is dat jouw jas? Nee, het is ___ jas.', 'mijn', array['ik', 'mij', 'mijne'], 'Is that your coat? No, it is my coat.', 'pronouns', 'beginner'),
+	('pron_onze', 'Wij hebben een hond. ___ hond heet Max.', 'Onze', array['Ons', 'Wij', 'Hen'], 'We have a dog. Our dog is called Max.', 'pronouns', 'elementary'),
+	('pron_hem_peter', 'Dit is Peter. Ken jij ___?', 'hem', array['hij', 'zijn', 'hen'], 'This is Peter. Do you know him?', 'pronouns', 'beginner'),
+
+	-- Adjectives: with or without -e
+	('adj_groot', 'Ik heb een ___ (groot) huis.', 'groot', array['grote', 'grootte', 'groten'], 'I have a big house.', 'adjectives', 'intermediate'),
+	('adj_rood', 'De ___ (rood) fiets is van mij.', 'rode', array['rood', 'roodde', 'roden'], 'The red bike is mine.', 'adjectives', 'elementary'),
+	('adj_klein', 'Het ___ (klein) kind slaapt.', 'kleine', array['klein', 'kleinen', 'kleiner'], 'The small child is sleeping.', 'adjectives', 'intermediate'),
+	('adj_mooi', 'Zij draagt een ___ (mooi) jurk.', 'mooie', array['mooi', 'mooien', 'mooier'], 'She is wearing a beautiful dress.', 'adjectives', 'elementary'),
+	('adj_lekker', 'Dat is ___ (lekker) brood.', 'lekker', array['lekkere', 'lekkeren', 'lekkers'], 'That is tasty bread.', 'adjectives', 'advanced'),
+
+	-- Plurals
+	('plural_boek', 'Ik heb twee ___ (boek).', 'boeken', array['boeks', 'boekes', 'boek'], 'I have two books.', 'plurals', 'beginner'),
+	('plural_stoel', 'Er staan drie ___ (stoel) in de kamer.', 'stoelen', array['stoels', 'stoel', 'stoelens'], 'There are three chairs in the room.', 'plurals', 'beginner'),
+	('plural_kind', 'Mijn ___ (kind) gaan naar school.', 'kinderen', array['kinds', 'kinden', 'kindens'], 'My children go to school.', 'plurals', 'elementary'),
+	('plural_aardbei', 'In de zomer eten we veel ___ (aardbei).', 'aardbeien', array['aardbeis', 'aardbeiens', 'aardbeies'], 'In summer we eat a lot of strawberries.', 'plurals', 'elementary'),
+	('plural_auto', 'Hoeveel ___ (auto) heb je?', 'auto''s', array['autos', 'auto', 'autoën'], 'How many cars do you have?', 'plurals', 'intermediate'),
+
+	-- Past tense
+	('past_ben_gegaan', 'Gisteren ___ ik naar de markt gegaan.', 'ben', array['heb', 'is', 'bent'], 'Yesterday I went to the market.', 'past_tense', 'elementary'),
+	('past_gekeken', 'Wij hebben een film ___ (kijken).', 'gekeken', array['gekijkt', 'kijken', 'keek'], 'We watched a film.', 'past_tense', 'elementary'),
+	('past_gemaakt', 'Heb jij je huiswerk al ___ (maken)?', 'gemaakt', array['gemaakd', 'maken', 'gemaken'], 'Have you already done your homework?', 'past_tense', 'elementary'),
+	('past_werkte', 'Mijn moeder ___ (werken) vorig jaar in Rotterdam.', 'werkte', array['werkten', 'werkde', 'gewerkt'], 'My mother worked in Rotterdam last year.', 'past_tense', 'intermediate'),
+	('past_had', 'Ik ___ (hebben) gisteren hoofdpijn.', 'had', array['heb', 'hadden', 'hebte'], 'I had a headache yesterday.', 'past_tense', 'intermediate'),
+	('past_geslapen', 'Hebben jullie goed ___ (slapen)?', 'geslapen', array['geslaapt', 'slapen', 'sliep'], 'Did you (all) sleep well?', 'past_tense', 'elementary'),
+
+	-- Word order and separable verbs
+	('order_opstaan', 'Hoe laat sta jij morgen ___ (opstaan)?', 'op', array['aan', 'uit', 'af'], 'What time are you getting up tomorrow?', 'word_order', 'intermediate'),
+	('order_aandoen', 'Doe je jas ___ (aandoen), het is koud.', 'aan', array['op', 'uit', 'af'], 'Put your coat on, it is cold.', 'word_order', 'intermediate'),
+	('order_of_komt', 'Ik weet niet of hij morgen ___ (komen).', 'komt', array['kom', 'komen', 'gekomen'], 'I don''t know if he is coming tomorrow.', 'word_order', 'advanced'),
+	('order_omdat_neem', 'Omdat het regent, ___ (nemen) ik de bus.', 'neem', array['neemt', 'nemen', 'genomen'], 'Because it is raining, I take the bus.', 'word_order', 'advanced'),
+	('order_dat_heeft', 'Hij zegt dat hij geen tijd ___ (hebben).', 'heeft', array['hebt', 'heb', 'hebben'], 'He says that he has no time.', 'word_order', 'advanced')
+on conflict (slug) do nothing;

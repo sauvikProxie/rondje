@@ -29,23 +29,30 @@ export const ERROR_MESSAGES = {
 
 	// Session configuration
 	invalid_session_name: 'Give the session a name of up to 60 characters.',
+	invalid_mode: 'Please choose a game.',
 	invalid_variant: 'Please choose one of the four game variants.',
-	invalid_pair_count: 'Choose 6, 8 or 12 pairs.',
+	invalid_pair_count: 'Choose 6, 8 or 12.',
+	invalid_group_count: 'Choose no groups, or 2 to 4 groups.',
 	invalid_scheduled_at: 'Please enter a valid date and time.',
 	not_enough_players: 'At least two players are needed to start the game.',
+	not_enough_players_for_groups: 'There are fewer players than groups. Wait for more players to join.',
 	not_enough_vocabulary: 'There are not enough words for this game variant and size. Try fewer pairs.',
+	not_enough_questions: 'There are not enough sentences for this game. Try fewer sentences.',
 	player_not_found: 'That player is no longer in this session.',
 
 	// Gameplay
 	invalid_input: 'That request was not valid.',
+	wrong_game_mode: "That action doesn't belong to this game.",
 	duplicate_action: 'That move was already processed.',
 	stale_state: 'The game moved on. Showing the latest state.',
-	not_your_board: 'You can only flip cards on your own board.',
 	not_your_turn: "It's not your turn yet.",
 	reveal_pending: 'Wait a moment, the cards are turning back.',
 	invalid_position: 'That card does not exist.',
 	already_matched: 'That card is already matched.',
 	already_flipped: 'That card is already face up. Pick another one.',
+	round_closed: 'This sentence is already closed. Get ready for the next one.',
+	already_answered: 'You already answered this sentence.',
+	invalid_answer: 'Please choose one of the options, or type an answer of up to 60 characters.',
 
 	// Infrastructure
 	rate_limited: "You're going a bit fast. Please wait a moment and try again.",
@@ -89,10 +96,13 @@ export function errorStatus(code: ErrorCode): number {
 		case 'invalid_avatar':
 		case 'invalid_level':
 		case 'invalid_session_name':
+		case 'invalid_mode':
 		case 'invalid_variant':
 		case 'invalid_pair_count':
+		case 'invalid_group_count':
 		case 'invalid_scheduled_at':
 		case 'invalid_position':
+		case 'invalid_answer':
 		case 'invalid_credentials':
 			return 400;
 		default:

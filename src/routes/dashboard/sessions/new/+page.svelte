@@ -1,7 +1,17 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import Alert from '$lib/components/shared/Alert.svelte';
-	import { PAIR_COUNTS, SESSION_NAME_MAX_LENGTH, VARIANTS, VARIANT_INFO, type Variant } from '$lib/game/constants';
+	import {
+		GAME_MODES,
+		GROUP_COUNTS,
+		MODE_INFO,
+		PAIR_COUNTS,
+		SESSION_NAME_MAX_LENGTH,
+		VARIANTS,
+		VARIANT_INFO,
+		type GameMode,
+		type Variant
+	} from '$lib/game/constants';
 	import { formatDateTime } from '$lib/utils/format';
 
 	let { form } = $props();
@@ -10,9 +20,14 @@
 	// svelte-ignore state_referenced_locally
 	const initial = form?.values;
 	let name = $state(initial?.name ?? '');
+	let mode = $state<GameMode>((initial?.mode as GameMode) || 'matchen');
 	let variant = $state<Variant>((initial?.variant as Variant) || 'word_image');
 	let pairCount = $state(Number(initial?.pairCount) || 8);
+	let groupCount = $state(Number(initial?.groupCount) || 1);
 	let scheduledLocal = $state(initial?.scheduledLocal ?? '');
+
+	const unit = $derived(MODE_INFO[mode].unit[1]);
+	const groupsLabel = (n: number) => (n === 1 ? 'No groups' : `${n} groups`);
 	let step = $state<'configure' | 'review'>('configure');
 	let submitting = $state(false);
 	let clientErrors = $state<Record<string, string>>({});
@@ -63,8 +78,10 @@
 		}}
 	>
 		<input type="hidden" name="name" value={name} />
-		<input type="hidden" name="variant" value={variant} />
+		<input type="hidden" name="mode" value={mode} />
+		<input type="hidden" name="variant" value={mode === 'matchen' ? variant : ''} />
 		<input type="hidden" name="pairCount" value={pairCount} />
+		<input type="hidden" name="groupCount" value={groupCount} />
 		<input type="hidden" name="scheduledAt" value={scheduledIso} />
 		<input type="hidden" name="scheduledLocal" value={scheduledLocal} />
 
@@ -104,6 +121,37 @@
 				</div>
 
 				<fieldset>
+					<legend class="field-label">Game</legend>
+					<div class="grid gap-3 sm:grid-cols-2">
+						{#each GAME_MODES as option (option)}
+							<label
+								class="flex min-h-12 cursor-pointer gap-3 rounded-2xl border-2 p-4 transition-colors has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-teal-deep {mode ===
+								option
+									? 'border-teal-deep bg-teal-soft'
+									: 'border-ink/10 bg-surface hover:border-ink/25'}"
+							>
+								<input type="radio" class="sr-only" name="mode-choice" value={option} bind:group={mode} />
+								<span class="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border-2 {mode === option ? 'border-teal-deep' : 'border-ink/30'}" aria-hidden="true">
+									{#if mode === option}<span class="size-2.5 rounded-full bg-teal-deep"></span>{/if}
+								</span>
+								<span>
+									<span class="block font-extrabold">{MODE_INFO[option].label}</span>
+									<span class="block text-sm text-ink-soft">{MODE_INFO[option].description}</span>
+									<span class="mt-1 block text-sm font-bold text-teal-deep" lang="nl">{MODE_INFO[option].example}</span>
+								</span>
+							</label>
+						{/each}
+					</div>
+					{#if errors.mode}<p class="field-error">{errors.mode}</p>{/if}
+					{#if mode === 'fill_blanks'}
+						<p class="mt-2 text-sm text-ink-soft">
+							Players at Beginner or Elementary level pick from four options; Intermediate and Advanced players type the answer.
+						</p>
+					{/if}
+				</fieldset>
+
+				{#if mode === 'matchen'}
+				<fieldset>
 					<legend class="field-label">Game variant</legend>
 					<div class="grid gap-3 sm:grid-cols-2">
 						{#each VARIANTS as option (option)}
@@ -127,9 +175,10 @@
 					</div>
 					{#if errors.variant}<p class="field-error">{errors.variant}</p>{/if}
 				</fieldset>
+				{/if}
 
 				<fieldset>
-					<legend class="field-label">Number of pairs</legend>
+					<legend class="field-label">Number of {unit}</legend>
 					<div class="grid grid-cols-3 gap-3">
 						{#each PAIR_COUNTS as option (option)}
 							<label
@@ -140,11 +189,34 @@
 							>
 								<input type="radio" class="sr-only" name="pair-choice" value={option} bind:group={pairCount} />
 								<span class="text-xl font-black">{option}</span>
-								<span class="text-xs text-ink-soft">{option * 2} cards</span>
+								<span class="text-xs text-ink-soft">{mode === 'matchen' ? `${option * 2} cards` : unit}</span>
 							</label>
 						{/each}
 					</div>
 					{#if errors.pairCount}<p class="field-error">{errors.pairCount}</p>{/if}
+				</fieldset>
+
+				<fieldset>
+					<legend class="field-label">Groups</legend>
+					<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+						{#each GROUP_COUNTS as option (option)}
+							<label
+								class="flex min-h-12 cursor-pointer items-center justify-center rounded-2xl border-2 px-3 text-center font-bold has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-teal-deep {groupCount ===
+								option
+									? 'border-teal-deep bg-teal-soft'
+									: 'border-ink/10 bg-surface hover:border-ink/25'}"
+							>
+								<input type="radio" class="sr-only" name="group-choice" value={option} bind:group={groupCount} />
+								{groupsLabel(option)}
+							</label>
+						{/each}
+					</div>
+					<p class="mt-1.5 text-sm text-ink-soft">
+						{groupCount > 1
+							? `Players are split into ${groupCount} groups at random when the game starts. Each group gets its own scorecard, and every point counts for the player's group.`
+							: 'Everyone plays for themselves.'}
+					</p>
+					{#if errors.groupCount}<p class="field-error">{errors.groupCount}</p>{/if}
 				</fieldset>
 
 				<button type="button" class="btn-primary w-full sm:w-auto" onclick={review}>Review session →</button>
@@ -154,13 +226,20 @@
 				<h2 class="text-xl font-extrabold">Review</h2>
 				<dl class="mt-4 divide-y-2 divide-ink/5">
 					<div class="flex justify-between gap-4 py-3"><dt class="text-ink-soft">Name</dt><dd class="text-right font-bold break-words">{name}</dd></div>
-					<div class="flex justify-between gap-4 py-3"><dt class="text-ink-soft">Variant</dt><dd class="text-right font-bold">{VARIANT_INFO[variant].label}</dd></div>
-					<div class="flex justify-between gap-4 py-3"><dt class="text-ink-soft">Pairs</dt><dd class="text-right font-bold">{pairCount} pairs · {pairCount * 2} cards per board</dd></div>
+					<div class="flex justify-between gap-4 py-3"><dt class="text-ink-soft">Game</dt><dd class="text-right font-bold">{MODE_INFO[mode].label}</dd></div>
+					{#if mode === 'matchen'}
+						<div class="flex justify-between gap-4 py-3"><dt class="text-ink-soft">Variant</dt><dd class="text-right font-bold">{VARIANT_INFO[variant].label}</dd></div>
+						<div class="flex justify-between gap-4 py-3"><dt class="text-ink-soft">Pairs</dt><dd class="text-right font-bold">{pairCount} pairs · {pairCount * 2} cards</dd></div>
+					{:else}
+						<div class="flex justify-between gap-4 py-3"><dt class="text-ink-soft">Sentences</dt><dd class="text-right font-bold">{pairCount}</dd></div>
+					{/if}
+					<div class="flex justify-between gap-4 py-3"><dt class="text-ink-soft">Groups</dt><dd class="text-right font-bold">{groupsLabel(groupCount)}</dd></div>
 					<div class="flex justify-between gap-4 py-3"><dt class="text-ink-soft">Scheduled</dt><dd class="text-right font-bold">{scheduledIso ? formatDateTime(scheduledIso) : 'Not set'}</dd></div>
 				</dl>
 				<p class="mt-4 text-sm text-ink-soft">
-					Vocabulary is picked at random from all themes when you start the game. Each player gets an
-					identical board.
+					{mode === 'matchen'
+						? 'Vocabulary is picked at random from all themes when you start the game. Everyone plays on one shared board.'
+						: 'Sentences are picked at random from all grammar topics when you start the game.'}
 				</p>
 				<div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row">
 					<button type="button" class="btn-ghost" onclick={() => (step = 'configure')}>← Edit</button>

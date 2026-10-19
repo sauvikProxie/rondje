@@ -1,5 +1,5 @@
 import type { CardFace } from '$lib/game/types';
-import type { SessionView, ViewPlayer } from '$lib/types/session-view';
+import type { SessionView, ViewGame, ViewPlayer, ViewRound } from '$lib/types/session-view';
 
 const NOW = Date.now();
 const iso = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
@@ -44,22 +44,34 @@ const PLAYERS: ViewPlayer[] = [
 	level: (['beginner', 'elementary', 'intermediate', 'advanced'] as const)[i % 4]!,
 	status: 'active' as const,
 	score: score as number,
+	group: null,
 	joined_at: iso(-60_000 + i * 1000)
 }));
 
-function base(status: SessionView['session']['status'], pairs: 6 | 8 | 12, players = PLAYERS): SessionView {
+/** The same players dealt into two groups. */
+const GROUPED = PLAYERS.map((p, i) => ({ ...p, group: (i % 2) + 1 }));
+
+function base(
+	status: SessionView['session']['status'],
+	pairs: 6 | 8 | 12,
+	players = PLAYERS,
+	options: { mode?: 'matchen' | 'fill_blanks'; groups?: number; me?: string } = {}
+): SessionView {
+	const mode = options.mode ?? 'matchen';
 	return {
 		revision: 42,
 		server_now: iso(0),
 		role: 'player',
-		me: 'p2',
+		me: options.me ?? 'p2',
 		session: {
 			id: '00000000-0000-4000-8000-000000000000',
 			name: 'Dutch class, Thursday evening group',
 			join_code: 'K7M2QX',
 			scheduled_at: null,
-			variant: 'de_het',
+			mode,
+			variant: mode === 'matchen' ? 'de_het' : null,
 			pair_count: pairs,
+			group_count: options.groups ?? 1,
 			status,
 			created_at: iso(-3_600_000),
 			started_at: status === 'lobby' ? null : iso(-600_000),
@@ -70,42 +82,66 @@ function base(status: SessionView['session']['status'], pairs: 6 | 8 | 12, playe
 	};
 }
 
+function blanksRound(phase: ViewRound['phase'], answerMode: 'choice' | 'type', mine: string | null): ViewRound {
+	return {
+		index: 2,
+		count: 8,
+		phase,
+		sentence: 'Mijn moeder ___ (werken) vorig jaar in Rotterdam.',
+		translation: 'My mother worked in Rotterdam last year.',
+		topic: 'past_tense',
+		answer_mode: answerMode,
+		options: answerMode === 'choice' ? ['werkten', 'werkte', 'gewerkt', 'werkde'] : null,
+		answered: mine === null ? ['p1', 'p3'] : ['p1', 'p2', 'p3'],
+		my_answer: mine,
+		correct_answer: phase === 'reveal' ? 'werkte' : null,
+		results: phase === 'reveal' ? { p1: true, p2: mine === 'werkte', p3: false } : null
+	};
+}
+
 export function scene(name: string, pairs: 6 | 8 | 12): SessionView {
 	const all = faces(pairs);
 	const card_count = pairs * 2;
-	const boards: Record<string, number[]> = {
-		p1: [0, 1, 2, 3, 4, 5].slice(0, Math.min(6, card_count)),
-		p2: [0, 1],
-		p3: [6, 7, 8, 9, 10, 11].slice(0, Math.min(6, card_count)),
-		p4: [],
-		p5: [2, 3, 4, 5],
-		p6: []
-	};
-	const visibleMatched = new Set(Object.values(boards).flat());
+	// Found pairs on the shared board, with the player who found each.
+	const matched: Record<string, string> = { '0': 'p1', '1': 'p1', '4': 'p3', '5': 'p3', '8': 'p5', '9': 'p5' };
 	const visibleFaces = (extra: number[]) =>
-		Object.fromEntries(Object.entries(all).filter(([pos]) => visibleMatched.has(Number(pos)) || extra.includes(Number(pos))));
+		Object.fromEntries(Object.entries(all).filter(([pos]) => pos in matched || extra.includes(Number(pos))));
 
-	const game = {
-		status: 'active' as const,
+	const game: ViewGame = {
+		status: 'active',
 		card_count,
 		turn_order: PLAYERS.map((p) => p.id),
 		active_player_id: 'p2',
-		first_flip: 3 as number | null,
-		mismatch_positions: null as [number, number] | null,
-		reveal_until: null as string | null,
-		turn_until: iso(42_000) as string | null,
+		first_flip: 3,
+		mismatch_positions: null,
+		reveal_until: null,
 		end_reason: null,
-		winner_ids: [] as string[],
+		winner_ids: [],
+		winning_groups: [],
 		started_at: iso(-600_000),
 		ended_at: null,
 		faces: visibleFaces([3]),
-		boards,
-		last_attempt: null
+		matched,
+		last_attempt: null,
+		round: null
 	};
+
+	const blanksGame = (round: ViewRound): ViewGame => ({
+		...game,
+		active_player_id: null,
+		card_count: 0,
+		first_flip: null,
+		faces: {},
+		matched: {},
+		reveal_until: round.phase === 'reveal' ? iso(3_000) : null,
+		round
+	});
 
 	switch (name) {
 		case 'lobby':
 			return base('lobby', pairs);
+		case 'lobby-blanks':
+			return base('lobby', pairs, PLAYERS, { mode: 'fill_blanks', groups: 2 });
 		case 'game-other':
 			return {
 				...base('in_progress', pairs),
@@ -115,16 +151,29 @@ export function scene(name: string, pairs: 6 | 8 | 12): SessionView {
 					first_flip: null,
 					mismatch_positions: [12, 15].map((p) => p % card_count) as [number, number],
 					reveal_until: iso(2_000),
-					turn_until: null,
 					faces: visibleFaces([12 % card_count, 15 % card_count]),
 					last_attempt: { player_id: 'p3', first_position: 12 % card_count, second_position: 15 % card_count, outcome: 'mismatch', at: iso(-100) }
 				}
+			};
+		case 'game-groups':
+			return { ...base('in_progress', pairs, GROUPED, { groups: 2 }), game };
+		case 'blanks-choice':
+			return { ...base('in_progress', 8, PLAYERS, { mode: 'fill_blanks' }), game: blanksGame(blanksRound('answering', 'choice', null)) };
+		case 'blanks-type':
+			return {
+				...base('in_progress', 8, GROUPED, { mode: 'fill_blanks', groups: 2, me: 'p4' }),
+				game: blanksGame(blanksRound('answering', 'type', null))
+			};
+		case 'blanks-reveal':
+			return {
+				...base('in_progress', 8, GROUPED, { mode: 'fill_blanks', groups: 2 }),
+				game: blanksGame(blanksRound('reveal', 'choice', 'werkten'))
 			};
 		case 'results':
 		case 'results-tie': {
 			const tie = name === 'results-tie';
 			const players = PLAYERS.map((p) =>
-				p.id === 'p6' ? { ...p, status: 'removed' as const } : p.id === 'p1' && !tie ? { ...p, score: pairs } : p
+				p.id === 'p6' ? { ...p, status: 'removed' as const } : p.id === 'p1' && !tie ? { ...p, score: pairs - 4 } : p
 			);
 			return {
 				...base('completed', pairs, players),
@@ -133,12 +182,26 @@ export function scene(name: string, pairs: 6 | 8 | 12): SessionView {
 					status: 'completed',
 					active_player_id: null,
 					first_flip: null,
-					turn_until: null,
 					end_reason: tie ? 'ended_by_host' : 'board_cleared',
 					winner_ids: tie ? ['p1', 'p3'] : ['p1'],
 					ended_at: iso(-1000),
-					boards: tie ? boards : { ...boards, p1: [...Array(card_count).keys()] },
 					faces: tie ? visibleFaces([]) : all
+				}
+			};
+		}
+		case 'results-groups': {
+			const players = GROUPED.map((p) => (p.id === 'p6' ? { ...p, status: 'removed' as const } : p));
+			return {
+				...base('completed', 8, players, { mode: 'fill_blanks', groups: 2 }),
+				game: {
+					...blanksGame(blanksRound('reveal', 'choice', 'werkte')),
+					status: 'completed',
+					end_reason: 'all_rounds_played',
+					winner_ids: ['p1', 'p3', 'p5'],
+					winning_groups: [1],
+					ended_at: iso(-1000),
+					reveal_until: null,
+					round: null
 				}
 			};
 		}

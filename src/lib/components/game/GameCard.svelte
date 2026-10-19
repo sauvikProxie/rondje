@@ -1,16 +1,20 @@
 <script lang="ts">
 	import { faceLabel, faceText, type BoardCell } from '$lib/game/view';
+	import type { ViewPlayer } from '$lib/types/session-view';
 
 	let {
 		cell,
 		interactive,
 		pending = false,
+		matcher,
 		onflip
 	}: {
 		cell: BoardCell;
 		/** Whether the viewer may flip this card right now (server re-validates). */
 		interactive: boolean;
 		pending?: boolean;
+		/** Player who found this pair (matched cells). */
+		matcher?: Pick<ViewPlayer, 'avatar' | 'nickname'>;
 		onflip?: (position: number) => void;
 	} = $props();
 
@@ -22,7 +26,7 @@
 		const n = `Card ${cell.position + 1}`;
 		if (cell.state === 'hidden') return `${n}, face down${pending ? ', flipping' : ''}`;
 		const content = cell.face ? faceLabel(cell.face) : 'unknown';
-		if (cell.state === 'matched') return `${n}: ${content}, matched`;
+		if (cell.state === 'matched') return `${n}: ${content}, matched${matcher ? ` by ${matcher.nickname}` : ''}`;
 		return `${n}: ${content}${cell.mismatch ? ', no match' : ', face up'}`;
 	});
 </script>
@@ -61,7 +65,11 @@
 			{text}
 		</span>
 		{#if cell.state === 'matched'}
-			<span class="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-teal-deep text-[0.65rem] text-white" aria-hidden="true">✓</span>
+			{#if matcher}
+				<span class="absolute top-0.5 right-0.5 grid size-6 place-items-center rounded-full bg-surface text-sm ring-2 ring-teal-deep" aria-hidden="true">{matcher.avatar}</span>
+			{:else}
+				<span class="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-teal-deep text-[0.65rem] text-white" aria-hidden="true">✓</span>
+			{/if}
 		{:else if cell.mismatch}
 			<span class="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-coral-deep text-[0.65rem] text-white" aria-hidden="true">✕</span>
 		{/if}

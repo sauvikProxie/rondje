@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { SessionSync } from '$lib/client/session-sync.svelte';
+	import BlanksTable from '$lib/components/game/BlanksTable.svelte';
 	import GameTable from '$lib/components/game/GameTable.svelte';
 	import ResultsView from '$lib/components/game/ResultsView.svelte';
 	import ParticipantList from '$lib/components/lobby/ParticipantList.svelte';
@@ -9,10 +10,11 @@
 	import Alert from '$lib/components/shared/Alert.svelte';
 	import ConfirmButton from '$lib/components/shared/ConfirmButton.svelte';
 	import ConnectionPill from '$lib/components/shared/ConnectionPill.svelte';
+	import GameBadge from '$lib/components/shared/GameBadge.svelte';
 	import NoticeToast from '$lib/components/shared/NoticeToast.svelte';
 	import StatusBadge from '$lib/components/shared/StatusBadge.svelte';
-	import VariantBadge from '$lib/components/shared/VariantBadge.svelte';
-	import { VARIANT_INFO } from '$lib/game/constants';
+	import { MODE_INFO, VARIANT_INFO } from '$lib/game/constants';
+	import { playerById } from '$lib/game/view';
 	import type { SessionView, ViewPlayer } from '$lib/types/session-view';
 	import { formatDateTime } from '$lib/utils/format';
 
@@ -24,10 +26,31 @@
 	onMount(() => sync.start());
 
 	const view = $derived(sync.view);
-	const status = $derived(view.session.status);
+	const session = $derived(view.session);
+	const status = $derived(session.status);
 	const activePlayers = $derived(view.players.filter((p) => p.status === 'active'));
-	const canStart = $derived(status === 'lobby' && activePlayers.length >= 2);
+	const minPlayers = $derived(Math.max(2, session.group_count));
+	const canStart = $derived(status === 'lobby' && activePlayers.length >= minPlayers);
 	let removing = $state<string | null>(null);
+
+	// The host moves a stalled game on (there is no turn timer).
+	const skip = $derived.by(() => {
+		const game = view.game;
+		if (status !== 'in_progress' || !game || game.status !== 'active') return null;
+		if (session.mode === 'matchen') {
+			const active = playerById(view, game.active_player_id);
+			return {
+				label: 'Skip turn',
+				hint: `Skip ${active?.nickname ?? 'the current player'}'s turn if they are away.`,
+				disabled: game.mismatch_positions !== null
+			};
+		}
+		return {
+			label: 'Reveal answer now',
+			hint: "Close this sentence if someone isn't answering. Players who haven't answered get no point.",
+			disabled: game.round?.phase !== 'answering'
+		};
+	});
 
 	async function deleteSession() {
 		const result = await sync.act('delete');
@@ -53,7 +76,7 @@
 			<h1 class="text-3xl font-black break-words sm:text-4xl">{view.session.name}</h1>
 			<div class="mt-2 flex flex-wrap items-center gap-2">
 				<StatusBadge {status} />
-				<VariantBadge variant={view.session.variant} pairCount={view.session.pair_count} />
+				<GameBadge mode={session.mode} variant={session.variant} pairCount={session.pair_count} groupCount={session.group_count} />
 				{#if view.session.scheduled_at}
 					<span class="pill bg-surface ring-2 ring-ink/10">📅 {formatDateTime(view.session.scheduled_at)}</span>
 				{/if}
@@ -87,10 +110,19 @@
 				<section class="card-surface p-5 sm:p-6" aria-labelledby="config-heading">
 					<h2 id="config-heading" class="text-xl font-extrabold">Game configuration</h2>
 					<dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
-						<div><dt class="text-ink-soft">Variant</dt><dd class="font-bold">{VARIANT_INFO[view.session.variant].label}</dd></div>
-						<div><dt class="text-ink-soft">Pairs</dt><dd class="font-bold">{view.session.pair_count} ({view.session.pair_count * 2} cards per board)</dd></div>
+						<div><dt class="text-ink-soft">Game</dt><dd class="font-bold">{MODE_INFO[session.mode].label}</dd></div>
+						{#if session.mode === 'matchen' && session.variant}
+							<div><dt class="text-ink-soft">Variant</dt><dd class="font-bold">{VARIANT_INFO[session.variant].label}</dd></div>
+							<div><dt class="text-ink-soft">Pairs</dt><dd class="font-bold">{session.pair_count} ({session.pair_count * 2} cards on the board)</dd></div>
+						{:else}
+							<div><dt class="text-ink-soft">Sentences</dt><dd class="font-bold">{session.pair_count}</dd></div>
+						{/if}
+						<div><dt class="text-ink-soft">Groups</dt><dd class="font-bold">{session.group_count > 1 ? `${session.group_count} groups` : 'No groups'}</dd></div>
 					</dl>
-					<p class="mt-2 text-sm text-ink-soft">{VARIANT_INFO[view.session.variant].description}</p>
+					<p class="mt-2 text-sm text-ink-soft">
+						{session.mode === 'matchen' && session.variant ? VARIANT_INFO[session.variant].description : MODE_INFO[session.mode].description}
+						{#if session.mode === 'fill_blanks'}Beginner and Elementary players pick from four options; Intermediate and Advanced players type the answer.{/if}
+					</p>
 				</section>
 			</div>
 
@@ -107,23 +139,36 @@
 						{sync.busy ? 'Starting…' : '▶ Start game'}
 					</button>
 					<p class="mt-2 text-center text-sm text-ink-soft">
-						{#if activePlayers.length < 2}
-							At least 2 players are needed to start ({activePlayers.length} so far).
+						{#if activePlayers.length < minPlayers}
+							At least {minPlayers} players are needed to start{session.group_count > 1 ? ` with ${session.group_count} groups` : ''} ({activePlayers.length} so far).
 						{:else}
-							Everyone gets an identical board. New players can't join after the start.
+							{session.group_count > 1 ? `Players are split into ${session.group_count} groups at random. ` : ''}New players can't join after the start.
 						{/if}
 					</p>
 				</div>
 			</section>
 		</div>
 	{:else if status === 'in_progress' && view.game}
-		<div class="mt-6">
-			<GameTable {sync} />
+		{#if skip}
+			<div class="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-surface p-3 ring-2 ring-ink/5 sm:px-4">
+				<p class="text-sm text-ink-soft">{skip.hint}</p>
+				<button type="button" class="btn-ghost min-h-11 px-4 text-sm" disabled={skip.disabled || sync.busy} onclick={() => sync.act('skip')}>
+					<span aria-hidden="true">⏭</span> {skip.label}
+				</button>
+			</div>
+		{/if}
+		<div class="mt-4">
+			{#if session.mode === 'fill_blanks'}
+				<BlanksTable {sync} />
+			{:else}
+				<GameTable {sync} />
+			{/if}
 		</div>
 		<details class="card-surface mt-6 p-5 sm:p-6">
 			<summary class="cursor-pointer text-lg font-extrabold">Manage participants</summary>
 			<p class="mt-1 text-sm text-ink-soft">
-				Removing the active player passes the turn on. Their score stays in the results.
+				{session.mode === 'matchen' ? 'Removing the active player passes the turn on.' : 'Removed players no longer need to answer.'}
+				Their score stays in the results{session.group_count > 1 ? ' and counts for their group' : ''}.
 			</p>
 			<div class="mt-2">
 				<ParticipantList players={view.players} online={sync.online} onremove={remove} {removing} showRemoved />

@@ -40,7 +40,7 @@ export class SupabaseAdmin {
 	async game(sessionId: string) {
 		const { data, error } = await this.client
 			.from('games')
-			.select('id, status, turn_order, active_player_id, end_reason, winner_ids')
+			.select('id, status, turn_order, active_player_id, current_round, end_reason, winner_ids, winning_groups')
 			.eq('session_id', sessionId)
 			.single();
 		if (error) throw error;
@@ -49,18 +49,39 @@ export class SupabaseAdmin {
 			status: string;
 			turn_order: string[];
 			active_player_id: string | null;
+			current_round: number | null;
 			end_reason: string | null;
 			winner_ids: string[];
+			winning_groups: number[];
 		};
 	}
 
 	async players(sessionId: string) {
 		const { data, error } = await this.client
 			.from('players')
-			.select('id, user_id, nickname, score, status')
+			.select('id, user_id, nickname, score, status, group_number')
 			.eq('session_id', sessionId);
 		if (error) throw error;
-		return data as { id: string; user_id: string; nickname: string; score: number; status: string }[];
+		return data as {
+			id: string;
+			user_id: string;
+			nickname: string;
+			score: number;
+			status: string;
+			group_number: number | null;
+		}[];
+	}
+
+	/** Fill in the Blanks: the correct answer of a round (read with the secret key). */
+	async roundAnswer(gameId: string, round: number): Promise<string> {
+		const { data, error } = await this.client
+			.from('game_rounds')
+			.select('grammar_questions(answer)')
+			.eq('game_id', gameId)
+			.eq('round', round)
+			.single();
+		if (error) throw error;
+		return (data as unknown as { grammar_questions: { answer: string } }).grammar_questions.answer;
 	}
 
 	/** Board layout: position -> pair id (read with the secret key; never exposed to clients). */
@@ -68,14 +89,6 @@ export class SupabaseAdmin {
 		const { data, error } = await this.client.from('game_layout').select('position, pair_id').eq('game_id', gameId);
 		if (error) throw error;
 		return new Map(data.map((row) => [row.position as number, row.pair_id as string]));
-	}
-
-	async boardCellCounts(gameId: string): Promise<Map<string, number>> {
-		const { data, error } = await this.client.from('board_cells').select('player_id, position').eq('game_id', gameId);
-		if (error) throw error;
-		const counts = new Map<string, number>();
-		for (const row of data) counts.set(row.player_id as string, (counts.get(row.player_id as string) ?? 0) + 1);
-		return counts;
 	}
 
 	trackUsers(ids: string[]) {

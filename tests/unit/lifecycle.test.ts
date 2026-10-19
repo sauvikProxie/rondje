@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'vitest';
-import { REVEAL_INTERVAL_MS, TURN_TIME_LIMIT_MS } from '../../src/lib/game/constants';
-import { flipCard, removePlayer } from '../../src/lib/game/game-state';
+import { REVEAL_INTERVAL_MS } from '../../src/lib/game/constants';
+import { flipCard, removePlayer, skipTurn } from '../../src/lib/game/game-state';
 import { resolveOverdue } from '../../src/lib/game/turn-management';
 import type { GameState } from '../../src/lib/game/types';
 import { actionId, matchingPositions, newGame, nonMatchingPositions, T0 } from './fixtures';
 
 function mustFlip(state: GameState, playerId: string, position: number, now: number) {
-	const result = flipCard(state, { playerId, boardPlayerId: playerId, position, actionId: actionId(), revision: state.revision }, now);
+	const result = flipCard(state, { playerId, position, actionId: actionId(), revision: state.revision }, now);
 	if (!result.ok) throw new Error(`flip rejected: ${result.error}`);
 	return result.state;
 }
@@ -38,39 +38,43 @@ describe('lifecycle edge cases', () => {
 		const [a, b] = nonMatchingPositions(state);
 		const revealing = mustFlip(mustFlip(state, first, a, T0), first, b, T0);
 		// The client still holds the pre-resolution revision, so it is told to refresh.
-		const stale = flipCard(revealing, { playerId: second, boardPlayerId: second, position: a, actionId: actionId(), revision: revealing.revision }, T0 + REVEAL_INTERVAL_MS);
+		const stale = flipCard(revealing, { playerId: second, position: a, actionId: actionId(), revision: revealing.revision }, T0 + REVEAL_INTERVAL_MS);
 		expect(stale).toMatchObject({ ok: false, error: 'stale_state' });
 		expect(stale.state.activePlayerId).toBe(second);
 		// With the fresh revision the flip succeeds.
-		const ok = flipCard(stale.state, { playerId: second, boardPlayerId: second, position: a, actionId: actionId(), revision: stale.state.revision }, T0 + REVEAL_INTERVAL_MS);
+		const ok = flipCard(stale.state, { playerId: second, position: a, actionId: actionId(), revision: stale.state.revision }, T0 + REVEAL_INTERVAL_MS);
 		expect(ok.ok).toBe(true);
 	});
 
-	test('an expired turn deadline turns back a pending first flip and advances the turn', () => {
+	test('there is no turn timer: a player who waits keeps the turn and a pending first flip', () => {
 		const state = newGame();
-		const [first, second] = state.turnOrder as [string, string, string];
+		const [first] = state.turnOrder as [string, string, string];
 		const pending = mustFlip(state, first, 4, T0 + 1_000);
-		const deadline = state.turnUntil!;
-		expect(resolveOverdue(pending, deadline - 1)).toBe(pending);
-		const expired = resolveOverdue(pending, deadline);
-		expect(expired.firstFlip).toBeNull();
-		expect(expired.activePlayerId).toBe(second);
-		expect(expired.turnUntil).toBe(deadline + TURN_TIME_LIMIT_MS);
-		expect(expired.attempts.at(-1)).toMatchObject({ outcome: 'timeout', playerId: first, firstPosition: 4 });
-		// Idempotent.
-		expect(resolveOverdue(expired, deadline)).toBe(expired);
+		const muchLater = T0 + 24 * 60 * 60 * 1000;
+		expect(resolveOverdue(pending, muchLater)).toBe(pending);
+		expect(pending.revealUntil).toBeNull();
 	});
 
-	test('an absent player without any flip also loses the turn at the deadline', () => {
+	test('the host can skip a stalled turn: a pending first flip turns back and the next player plays', () => {
 		const state = newGame();
 		const [first, second, third] = state.turnOrder as [string, string, string];
-		const once = resolveOverdue(state, state.turnUntil! + 5);
-		expect(once.activePlayerId).toBe(second);
-		const twice = resolveOverdue(once, once.turnUntil!);
-		expect(twice.activePlayerId).toBe(third);
-		const thrice = resolveOverdue(twice, twice.turnUntil!);
-		expect(thrice.activePlayerId).toBe(first);
-		expect(first).not.toBe(second);
+		const pending = mustFlip(state, first, 4, T0 + 1_000);
+		const skipped = skipTurn(pending, T0 + 2_000);
+		expect(skipped.ok).toBe(true);
+		expect(skipped.state).toMatchObject({ firstFlip: null, activePlayerId: second, revision: pending.revision + 1 });
+		expect(skipped.state.attempts.at(-1)).toMatchObject({ outcome: 'cancelled', playerId: first, firstPosition: 4 });
+		// Skipping without a pending flip works too, and wraps around.
+		const again = skipTurn(skipTurn(skipped.state, T0).state, T0).state;
+		expect(again.activePlayerId).toBe(first);
+		expect(third).not.toBe(first);
+	});
+
+	test('skipping during a mismatch reveal is refused (the turn is already passing on)', () => {
+		const state = newGame();
+		const [first] = state.turnOrder as [string, string, string];
+		const [a, b] = nonMatchingPositions(state);
+		const revealing = mustFlip(mustFlip(state, first, a, T0), first, b, T0);
+		expect(skipTurn(revealing, T0 + 100)).toMatchObject({ ok: false, error: 'reveal_pending' });
 	});
 
 	test('removing the active player cancels the pending attempt and advances the turn', () => {
@@ -83,15 +87,14 @@ describe('lifecycle edge cases', () => {
 		expect(after.players[first]!.status).toBe('removed');
 		expect(after.activePlayerId).toBe(second);
 		expect(after.firstFlip).toBeNull();
-		expect(after.turnUntil).toBe(T0 + 2_000 + TURN_TIME_LIMIT_MS);
 		expect(after.attempts.at(-1)).toMatchObject({ outcome: 'cancelled', playerId: first });
 		expect(after.status).toBe('active');
 		expect(after.revision).toBe(pending.revision + 1);
 
 		// The removed player cannot act any more and is skipped from now on.
-		const blocked = flipCard(after, { playerId: first, boardPlayerId: first, position: 0, actionId: actionId(), revision: after.revision }, T0 + 3_000);
+		const blocked = flipCard(after, { playerId: first, position: 0, actionId: actionId(), revision: after.revision }, T0 + 3_000);
 		expect(blocked).toMatchObject({ ok: false, error: 'removed' });
-		const skipped = resolveOverdue(resolveOverdue(after, after.turnUntil!), after.turnUntil! + TURN_TIME_LIMIT_MS);
+		const skipped = skipTurn(skipTurn(after, T0).state, T0).state;
 		expect(skipped.activePlayerId).not.toBe(first);
 	});
 
@@ -111,7 +114,6 @@ describe('lifecycle edge cases', () => {
 		const [first, , third] = state.turnOrder as [string, string, string];
 		const after = removePlayer(state, third, T0 + 100).state;
 		expect(after.activePlayerId).toBe(first);
-		expect(after.turnUntil).toBe(state.turnUntil);
 	});
 
 	test('removal that leaves fewer than two players ends the game; the removed score is kept', () => {
@@ -122,6 +124,8 @@ describe('lifecycle edge cases', () => {
 		const result = removePlayer(state, first, T0 + 100);
 		expect(result.state).toMatchObject({ status: 'completed', endReason: 'not_enough_players', winnerIds: [second] });
 		expect(result.state.players[first]).toMatchObject({ status: 'removed', score: 1 });
+		// Pairs found by a removed player stay found.
+		expect(result.state.matchedBy).toEqual({ [x]: first, [y]: first });
 	});
 
 	test('removal is idempotent and unknown players are reported', () => {

@@ -26,12 +26,18 @@ const APP_PAGES = [
 
 const SCENES = [
 	{ name: 'lobby', query: 'scene=lobby&pairs=8' },
+	{ name: 'lobby-blanks', query: 'scene=lobby-blanks&pairs=8' },
 	{ name: 'game-6', query: 'scene=game&pairs=6' },
 	{ name: 'game-8', query: 'scene=game&pairs=8' },
 	{ name: 'game-12', query: 'scene=game&pairs=12' },
 	{ name: 'game-reveal-12', query: 'scene=game-other&pairs=12' },
+	{ name: 'game-groups-12', query: 'scene=game-groups&pairs=12' },
+	{ name: 'blanks-choice', query: 'scene=blanks-choice&pairs=8' },
+	{ name: 'blanks-type', query: 'scene=blanks-type&pairs=8' },
+	{ name: 'blanks-reveal', query: 'scene=blanks-reveal&pairs=8' },
 	{ name: 'results', query: 'scene=results&pairs=8' },
-	{ name: 'results-tie', query: 'scene=results-tie&pairs=12' }
+	{ name: 'results-tie', query: 'scene=results-tie&pairs=12' },
+	{ name: 'results-groups', query: 'scene=results-groups&pairs=8' }
 ];
 
 async function expectNoHorizontalOverflow(page: Page) {
@@ -77,6 +83,13 @@ for (const viewport of VIEWPORTS) {
 						return !!top && el.contains(top);
 					});
 					expect(hit, 'last card must not be obscured').toBe(true);
+				}
+
+				// Fill in the Blanks: options and the answer field are usable touch targets.
+				const controls = page.locator('[aria-label="Answer options"] button, #blank-answer');
+				for (let i = 0; i < (await controls.count()); i++) {
+					const box = await controls.nth(i).boundingBox();
+					expect(box!.height).toBeGreaterThanOrEqual(44);
 				}
 				await page.screenshot({ path: `test-results/responsive/${viewport.name}-${scene.name}.png`, fullPage: true });
 			});

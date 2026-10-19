@@ -1,12 +1,13 @@
-import type { EndReason, PairCount, ProficiencyLevel, Variant } from '$lib/game/constants';
+import type { EndReason, GameMode, GrammarTopic, PairCount, ProficiencyLevel, Variant } from '$lib/game/constants';
 import type { AttemptOutcome, CardFace } from '$lib/game/types';
 import type { ErrorCode } from '$lib/errors';
 
 /**
  * The caller's authorised view of a session, exactly as produced by
  * private.session_view() in supabase/schema.sql. It never contains the
- * content of a face-down position: `game.faces` holds only positions that are
- * matched on some board or flipped in the current attempt.
+ * content of a face-down position (`game.faces` holds only positions that are
+ * matched or flipped in the current attempt), nor the answer of a Fill in the
+ * Blanks round that is still open.
  */
 export interface SessionView {
 	revision: number;
@@ -25,8 +26,13 @@ export interface ViewSession {
 	name: string;
 	join_code: string;
 	scheduled_at: string | null;
-	variant: Variant;
+	mode: GameMode;
+	/** Matchen only; null for Fill in the Blanks. */
+	variant: Variant | null;
+	/** Pairs (Matchen) or sentences (Fill in the Blanks). */
 	pair_count: PairCount;
+	/** 1 = no groups. */
+	group_count: number;
 	status: 'lobby' | 'in_progress' | 'completed';
 	created_at: string;
 	started_at: string | null;
@@ -40,6 +46,8 @@ export interface ViewPlayer {
 	level: ProficiencyLevel;
 	status: 'active' | 'removed';
 	score: number;
+	/** Group number (1-based) once the game has started, when the session uses groups. */
+	group: number | null;
 	joined_at: string;
 }
 
@@ -53,25 +61,56 @@ export interface ViewAttempt {
 
 export interface ViewGame {
 	status: 'active' | 'completed';
-	card_count: number;
 	turn_order: string[];
+	/** Matchen: whose turn it is. Always null in Fill in the Blanks. */
 	active_player_id: string | null;
-	first_flip: number | null;
-	mismatch_positions: [number, number] | null;
+	/** End of a Matchen mismatch reveal or of a Fill in the Blanks answer reveal. */
 	reveal_until: string | null;
-	turn_until: string | null;
 	end_reason: EndReason | null;
 	winner_ids: string[];
+	/** Groups with the best result, when the session uses groups. */
+	winning_groups: number[];
 	started_at: string;
 	ended_at: string | null;
+
+	// Matchen (empty / null in Fill in the Blanks)
+	/** Cards on the shared board. */
+	card_count: number;
+	first_flip: number | null;
+	mismatch_positions: [number, number] | null;
 	/** Position -> face, only for positions the caller may see. */
 	faces: Record<string, CardFace>;
-	/** Player id -> matched positions on that player's board. */
-	boards: Record<string, number[]>;
+	/** Matched position -> player who found the pair (null if that player no longer exists). */
+	matched: Record<string, string | null>;
 	last_attempt: ViewAttempt | null;
+
+	/** Fill in the Blanks: the current round while the game is active, else null. */
+	round: ViewRound | null;
 }
 
-/** Result shape of the action RPCs (flip, start, end, remove, view). */
+export interface ViewRound {
+	/** 0-based. */
+	index: number;
+	count: number;
+	phase: 'answering' | 'reveal';
+	/** Dutch sentence with one blank written as "___". */
+	sentence: string;
+	translation: string;
+	topic: GrammarTopic;
+	/** How the caller answers: pick an option or type. Null for the host. */
+	answer_mode: 'choice' | 'type' | null;
+	/** The four options, only for callers who answer by choice (and the host). */
+	options: string[] | null;
+	/** Players who have answered this round. */
+	answered: string[];
+	my_answer: string | null;
+	/** Only once the round is closed. */
+	correct_answer: string | null;
+	/** Player id -> answered correctly, only once the round is closed. */
+	results: Record<string, boolean> | null;
+}
+
+/** Result shape of the action RPCs (flip, answer, skip, start, end, remove, view). */
 export interface ActionResult {
 	ok: boolean;
 	error: ErrorCode | null;
@@ -87,8 +126,10 @@ export interface LookupResult {
 		id: string;
 		name: string;
 		join_code: string;
-		variant: Variant;
+		mode: GameMode;
+		variant: Variant | null;
 		pair_count: PairCount;
+		group_count: number;
 		status: ViewSession['status'];
 		scheduled_at: string | null;
 	};

@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import { createTurnOrder, generateLayout, selectPairs, validateLayout } from '../../src/lib/game/board-generation';
 import { PAIR_COUNTS, VARIANTS } from '../../src/lib/game/constants';
-import { boardFor, createGame } from '../../src/lib/game/game-state';
+import { createGame } from '../../src/lib/game/game-state';
 import { pairTokens } from '../../src/lib/game/matching';
 import { seededRng } from '../../src/lib/game/random';
 import { GameRuleError, type PairDefinition, type VocabularyItem } from '../../src/lib/game/types';
-import { items, newGame, pairs, T0 } from './fixtures';
+import { items, newGame, pairs } from './fixtures';
 
 describe('board generation', () => {
 	test.each(VARIANTS.flatMap((v) => PAIR_COUNTS.map((n) => [v, n] as const)))(
@@ -45,18 +45,11 @@ describe('board generation', () => {
 		expect(a).not.toEqual(b);
 	});
 
-	test('every player gets a board with the same layout and every position unmatched', () => {
+	test('everyone plays on one shared board that starts with every position unmatched', () => {
 		const state = newGame({ players: ['a', 'b', 'c', 'd'], pairCount: 8 });
-		const boards = ['a', 'b', 'c', 'd'].map((id) => boardFor(state, id));
-		for (const board of boards) {
-			expect(board).toHaveLength(16);
-			expect(board.every((cell) => !cell.matched)).toBe(true);
-			expect(board.map(({ pairId, side }) => ({ pairId, side }))).toEqual(
-				boards[0]!.map(({ pairId, side }) => ({ pairId, side }))
-			);
-		}
-		// One layout stored once; boards only hold matched positions.
-		expect(Object.values(state.players).every((p) => p.matched.length === 0)).toBe(true);
+		expect(state.layout).toHaveLength(16);
+		expect(state.matchedBy).toEqual({});
+		expect(Object.values(state.players).every((p) => p.score === 0)).toBe(true);
 	});
 
 	test('the turn order contains every eligible player exactly once', () => {
@@ -65,6 +58,27 @@ describe('board generation', () => {
 		expect([...state.turnOrder].sort()).toEqual(players);
 		expect(state.activePlayerId).toBe(state.turnOrder[0]);
 		expect(() => createTurnOrder(['a', 'a'], seededRng(1))).toThrow();
+	});
+
+	test('without groups nobody has a group', () => {
+		const state = newGame();
+		expect(Object.values(state.players).every((p) => p.group === null)).toBe(true);
+	});
+
+	test.each([2, 3, 4])('%i groups: balanced, and the turn order alternates between groups', (groupCount) => {
+		const players = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
+		const state = newGame({ players, groupCount, seed: groupCount });
+		const sizes = new Map<number, number>();
+		for (const p of Object.values(state.players)) sizes.set(p.group!, (sizes.get(p.group!) ?? 0) + 1);
+		expect([...sizes.keys()].sort()).toEqual(Array.from({ length: groupCount }, (_, i) => i + 1));
+		expect(Math.max(...sizes.values()) - Math.min(...sizes.values())).toBeLessThanOrEqual(1);
+		// Consecutive turns belong to different groups.
+		const groups = state.turnOrder.map((id) => state.players[id]!.group);
+		groups.forEach((g, i) => expect(g).toBe((i % groupCount) + 1));
+	});
+
+	test('a game cannot start with fewer players than groups', () => {
+		expect(() => newGame({ players: ['a', 'b'], groupCount: 3 })).toThrow(GameRuleError);
 	});
 
 	test('no two selected pairs share an emoji or a word', () => {
@@ -114,7 +128,7 @@ describe('board generation', () => {
 
 	test('a game cannot start with fewer than two players', () => {
 		expect(() =>
-			createGame({ variant: 'word_image', pairCount: 6, pairs, items, playerIds: ['solo'], rng: seededRng(1), now: T0 })
+			createGame({ variant: 'word_image', pairCount: 6, pairs, items, playerIds: ['solo'], rng: seededRng(1) })
 		).toThrow(GameRuleError);
 	});
 

@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import Alert from '$lib/components/shared/Alert.svelte';
 	import Logo from '$lib/components/shared/Logo.svelte';
-	import VariantBadge from '$lib/components/shared/VariantBadge.svelte';
+	import GameBadge from '$lib/components/shared/GameBadge.svelte';
 	import { errorMessage } from '$lib/errors';
 	import { AVATARS, LEVEL_LABELS, NICKNAME_MAX_LENGTH, PROFICIENCY_LEVELS } from '$lib/game/constants';
 
@@ -74,7 +74,9 @@
 			<div class="card-surface p-5 sm:p-7">
 				<p class="text-sm font-bold text-ink-soft">You're joining</p>
 				<h1 class="mt-0.5 text-3xl font-black break-words">{session.name}</h1>
-				<div class="mt-2"><VariantBadge variant={session.variant} pairCount={session.pair_count} /></div>
+				<div class="mt-2">
+					<GameBadge mode={session.mode} variant={session.variant} pairCount={session.pair_count} groupCount={session.group_count} />
+				</div>
 
 				<form
 					method="POST"

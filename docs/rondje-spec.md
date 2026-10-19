@@ -1484,3 +1484,67 @@ specification leaves open. They clarify; they do not change any rule above.
     topic but may not broadcast.
 12. **Secret key.** The application never needs the Supabase secret key.
     It is used only by test tooling under `tests/`.
+
+---
+
+# 23. Changes requested after the rebuild (2026-10-19)
+
+These changes were requested by the product owner after the rebuild. Where
+they conflict with earlier sections (notably 2.2 "Team-based gameplay" and
+"Other games unrelated to Matchen", 7.1 "every player has their own board",
+9.5 and 9.6 "turn time limit"), this section wins.
+
+## 23.1 No turn timer
+
+The 60-second turn limit is removed: there is no `turn_until` deadline and no
+countdown. A player keeps their turn however long they take. Because an
+absent player could otherwise stall the game, the host has a **Skip turn**
+control (`skip_turn`): in Matchen the active player's pending first flip turns
+back and the next player's turn begins (refused while a mismatch reveal is
+pending); in Fill in the Blanks it closes the current round. The short
+reveals (2.5 s mismatch, 4 s answer) remain; they are pauses, not timers.
+
+## 23.2 Matchen: one shared board
+
+All players play on **one shared board** per game (replacing per-player
+boards in 7.1, 8.1 step 5 and 14.7). A matched pair stays face up for
+everyone for the rest of the game and is credited to the player who found it
+(shown with their avatar on the card); nobody can flip it again. The game ends
+when every pair has been found (`board_cleared`); the highest score wins, or
+the best group (23.3). This also fixes matched cards appearing to flip back
+when the view followed the next player's board.
+
+## 23.3 Groups
+
+The host chooses no groups, or 2–4 groups, when creating a session. At game
+start the shuffled players are dealt round-robin into groups (sizes differ by
+at most one), so the Matchen turn order alternates between groups. At least
+as many players as groups are needed to start. Every point a player scores
+counts for their group, including players removed later. Each group has its
+own scorecard (members and total) during the game and in the results.
+Groups are ranked by points per member, which equals ranking by total when
+groups are equally large and stays fair when they are not; a group with no
+active members cannot win. The winners are the active members of the winning
+group(s); equal results are a tie.
+
+## 23.4 Fill in the Blanks
+
+A second game mode next to Matchen. The host picks it instead of a Matchen
+variant and chooses 6, 8 or 12 sentences.
+
+- Each round shows one Dutch grammar sentence with one blank and its English
+  meaning. Where a specific word form is needed the base form is given in
+  brackets, so a typed answer has exactly one correct form.
+- **Everyone answers at the same time**, once per round; answers are final.
+- Difficulty follows each player's level: **Beginner and Elementary** pick
+  from four options (the answer plus three wrong options, shuffled once per
+  round); **Intermediate and Advanced** type the answer. Typed answers ignore
+  case, extra spaces, typographic apostrophes and final punctuation.
+- A correct answer scores one point. When every active player has answered
+  (or the host closes the round) the answer and who got it right are shown
+  for 4 seconds, then the next round starts; after the last round the game
+  ends (`all_rounds_played`).
+- The correct answer and other players' answers are never sent to clients
+  before the round closes; typing players never receive the options.
+- Content lives in `grammar_questions` (topics: verbs, articles,
+  prepositions, pronouns, adjectives, plurals, past tense, word order).

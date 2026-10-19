@@ -1,11 +1,20 @@
 import { describe, expect, test } from 'vitest';
 import { endGame, flipCard } from '../../src/lib/game/game-state';
-import { isTie, rankPlayers, topScorers } from '../../src/lib/game/scoring';
+import {
+	assignGroups,
+	decideWinners,
+	groupsUneven,
+	isTie,
+	rankGroups,
+	rankPlayers,
+	topScorers
+} from '../../src/lib/game/scoring';
+import { resolveOverdue } from '../../src/lib/game/turn-management';
 import type { GameState } from '../../src/lib/game/types';
 import { actionId, matchingPositions, newGame, nonMatchingPositions, T0 } from './fixtures';
 
 function flip(state: GameState, playerId: string, position: number, id = actionId(), revision = state.revision) {
-	return flipCard(state, { playerId, boardPlayerId: playerId, position, actionId: id, revision }, T0 + 1_000);
+	return flipCard(state, { playerId, position, actionId: id, revision }, T0 + 1_000);
 }
 
 function mustFlip(state: GameState, playerId: string, position: number) {
@@ -49,23 +58,29 @@ describe('scoring and completion', () => {
 		expect(replay2.state.players[p]!.score).toBe(1);
 	});
 
-	test('the game ends as soon as one player clears their board, and that player wins', () => {
+	test('the game ends when every pair on the shared board is found; the highest score wins', () => {
 		let state = newGame({ pairCount: 6 });
-		const p = state.activePlayerId!;
+		const [first, second] = state.turnOrder as [string, string, string];
 		const pairs = matchingPositions(state);
-		pairs.forEach(([a, b], i) => {
-			state = mustFlip(state, p, a);
-			state = mustFlip(state, p, b);
-			if (i < pairs.length - 1) expect(state.status).toBe('active');
+		// First player finds one pair, then misses; the second player finds the rest.
+		state = mustFlip(mustFlip(state, first, pairs[0]![0]), first, pairs[0]![1]);
+		const [x, y] = nonMatchingPositions(state, new Set(pairs[0]));
+		state = mustFlip(mustFlip(state, first, x), first, y);
+		state = resolveOverdue(state, T0 + 60_000);
+		pairs.slice(1).forEach(([a, b], i) => {
+			state = mustFlip(state, second, a);
+			state = mustFlip(state, second, b);
+			if (i < pairs.length - 2) expect(state.status).toBe('active');
 		});
 		expect(state).toMatchObject({
 			status: 'completed',
 			endReason: 'board_cleared',
-			winnerIds: [p],
-			activePlayerId: null,
-			turnUntil: null
+			winnerIds: [second],
+			winningGroups: [],
+			activePlayerId: null
 		});
-		expect(state.players[p]!.score).toBe(6);
+		expect(state.players[second]!.score).toBe(5);
+		expect(state.players[first]!.score).toBe(1);
 	});
 
 	test('the game cannot continue after completion', () => {
@@ -89,8 +104,9 @@ describe('scoring and completion', () => {
 		state = mustFlip(mustFlip(state, first, pairs[0]![0]), first, pairs[0]![1]);
 		const [x, y] = nonMatchingPositions(state, new Set(pairs[0]));
 		state = mustFlip(mustFlip(state, first, x), first, y);
-		state = { ...state, mismatch: null, revealUntil: null, activePlayerId: second, turnUntil: T0 + 60_000, revision: state.revision + 1 };
-		// second: one match on their own board.
+		state = resolveOverdue(state, T0 + 60_000);
+		expect(state.activePlayerId).toBe(second);
+		// second: one match on the shared board.
 		state = mustFlip(mustFlip(state, second, pairs[1]![0]), second, pairs[1]![1]);
 
 		const ended = endGame(state);
@@ -131,5 +147,72 @@ describe('scoring and completion', () => {
 		const ranked = rankPlayers(players, winners);
 		expect(ranked.filter((r) => r.rank === 1).map((r) => r.player.id)).toEqual(['a', 'b']);
 		expect(ranked.every((r) => r.isWinner === (r.rank === 1))).toBe(true);
+	});
+});
+
+describe('groups', () => {
+	const p = (id: string, group: number, score: number, status: 'active' | 'removed' = 'active') => ({ id, group, score, status });
+
+	test('players are dealt round-robin into groups', () => {
+		expect([...assignGroups(['a', 'b', 'c', 'd', 'e'], 2)]).toEqual([
+			['a', 1], ['b', 2], ['c', 1], ['d', 2], ['e', 1]
+		]);
+		expect([...assignGroups(['a', 'b'], 1).values()]).toEqual([null, null]);
+	});
+
+	test('each group has its own scorecard with the total of its members', () => {
+		const players = [p('a', 1, 3), p('b', 2, 1), p('c', 1, 2), p('d', 2, 4)];
+		const standings = rankGroups(players, 2, [2]);
+		expect(standings.map((s) => [s.group, s.total, s.rank, s.isWinner])).toEqual([
+			[1, 5, 1, false],
+			[2, 5, 1, true]
+		]);
+		expect(standings[0]!.members.map((m) => m.id)).toEqual(['a', 'c']);
+	});
+
+	test('the group with the most points wins; members of the winning group are the winners', () => {
+		const players = [p('a', 1, 3), p('b', 2, 1), p('c', 1, 2), p('d', 2, 2)];
+		expect(decideWinners(players, 2)).toEqual({ winnerIds: ['a', 'c'], winningGroups: [1] });
+	});
+
+	test('equal group results are a tie between groups', () => {
+		const players = [p('a', 1, 3), p('b', 2, 1), p('c', 1, 0), p('d', 2, 2)];
+		const result = decideWinners(players, 2);
+		expect(result.winningGroups).toEqual([1, 2]);
+		expect(isTie(result.winningGroups)).toBe(true);
+	});
+
+	test('uneven groups are ranked by points per member', () => {
+		// Group 1: 3 players, 6 points (2 each). Group 2: 2 players, 5 points (2.5 each).
+		const players = [p('a', 1, 2), p('b', 2, 3), p('c', 1, 2), p('d', 2, 2), p('e', 1, 2)];
+		const standings = rankGroups(players, 2);
+		expect(groupsUneven(standings)).toBe(true);
+		expect(standings.map((s) => [s.group, s.total, s.rank])).toEqual([
+			[2, 5, 1],
+			[1, 6, 2]
+		]);
+		expect(decideWinners(players, 2).winningGroups).toEqual([2]);
+	});
+
+	test('removed members still count for their group but cannot win; a group with no active members cannot win', () => {
+		const players = [p('a', 1, 4, 'removed'), p('b', 1, 1), p('c', 2, 2), p('d', 3, 9, 'removed')];
+		const result = decideWinners(players, 3);
+		expect(result).toEqual({ winnerIds: ['b'], winningGroups: [1] });
+		const standings = rankGroups(players, 3, result.winningGroups);
+		expect(standings.at(-1)).toMatchObject({ group: 3, rank: null, isWinner: false });
+	});
+
+	test('a game with groups ends with the winning group recorded', () => {
+		let state = newGame({ players: ['a', 'b', 'c', 'd'], groupCount: 2, pairCount: 6 });
+		const first = state.activePlayerId!;
+		for (const [x, y] of matchingPositions(state)) {
+			state = mustFlip(mustFlip(state, first, x), first, y);
+		}
+		const group = state.players[first]!.group!;
+		expect(state.status).toBe('completed');
+		expect(state.winningGroups).toEqual([group]);
+		expect([...state.winnerIds].sort()).toEqual(
+			Object.values(state.players).filter((x) => x.group === group).map((x) => x.id).sort()
+		);
 	});
 });

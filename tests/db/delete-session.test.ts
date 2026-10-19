@@ -39,12 +39,11 @@ describe('delete_session', () => {
 		const pairs = await db.matchingPairs(g.sessionId);
 		const active = (await db.game(g.sessionId)).active_player_id;
 		const p = [g.a, g.b].find((x) => x.playerId === active)!;
-		await db.flip(p.user, g.sessionId, p.playerId, pairs[0]![0]);
-		await db.flip(p.user, g.sessionId, p.playerId, pairs[0]![1]);
+		await db.flip(p.user, g.sessionId, pairs[0]![0]);
+		await db.flip(p.user, g.sessionId, pairs[0]![1]);
 
 		const before = {
 			layout: await count('public.game_layout'),
-			cells: await count('public.board_cells'),
 			attempts: await count('public.game_attempts'),
 			actions: await count('public.processed_actions')
 		};
@@ -52,12 +51,24 @@ describe('delete_session', () => {
 
 		expect(await db.game(g.sessionId)).toBeUndefined();
 		expect(await count('public.game_layout')).toBe(before.layout - 12);
-		expect(await count('public.board_cells')).toBe(before.cells - 24);
 		expect(await count('public.game_attempts')).toBe(before.attempts - 1);
 		expect(await count('public.processed_actions')).toBe(before.actions - 2);
 
 		// The other session is untouched and still playable.
 		expect((await db.rpc(other.host, 'get_session_view', { p_session_id: other.sessionId })).ok).toBe(true);
+	});
+
+	test('deletes a Fill in the Blanks session with its rounds and answers', async () => {
+		const host = await db.createHost();
+		const { sessionId, joinCode } = await db.createBlanksSession(host);
+		const a = await db.join(joinCode, 'A');
+		await db.join(joinCode, 'B', '🐼');
+		await db.rpc(host, 'start_game', { p_session_id: sessionId });
+		await db.answer(a.user, sessionId, (await db.currentQuestion(sessionId)).answer);
+		const before = { rounds: await count('public.game_rounds'), answers: await count('public.round_answers') };
+		expect((await db.rpc(host, 'delete_session', { p_session_id: sessionId })).ok).toBe(true);
+		expect(await count('public.game_rounds')).toBe(before.rounds - 6);
+		expect(await count('public.round_answers')).toBe(before.answers - 1);
 	});
 
 	test('deletes a completed session', async () => {
@@ -90,7 +101,7 @@ describe('delete_session', () => {
 		const g = await started();
 		await db.rpc(g.host, 'delete_session', { p_session_id: g.sessionId });
 		expect((await db.rpc(g.a.user, 'get_session_view', { p_session_id: g.sessionId })).error).toBe('session_not_found');
-		expect((await db.flip(g.a.user, g.sessionId, g.a.playerId, 0, { revision: 1 })).error).toBe('session_not_found');
+		expect((await db.flip(g.a.user, g.sessionId, 0, { revision: 1 })).error).toBe('session_not_found');
 	});
 
 	test('a final notification is broadcast so open pages refetch', async () => {

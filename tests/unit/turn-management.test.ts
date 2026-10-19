@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'vitest';
-import { REVEAL_INTERVAL_MS, TURN_TIME_LIMIT_MS } from '../../src/lib/game/constants';
+import { REVEAL_INTERVAL_MS } from '../../src/lib/game/constants';
 import { flipCard } from '../../src/lib/game/game-state';
 import { nextDeadline, nextPlayer, resolveOverdue } from '../../src/lib/game/turn-management';
 import type { GameState } from '../../src/lib/game/types';
 import { actionId, matchingPositions, newGame, nonMatchingPositions, T0 } from './fixtures';
 
-function flip(state: GameState, playerId: string, position: number, now = T0 + 1_000, board = playerId) {
-	return flipCard(state, { playerId, boardPlayerId: board, position, actionId: actionId(), revision: state.revision }, now);
+function flip(state: GameState, playerId: string, position: number, now = T0 + 1_000) {
+	return flipCard(state, { playerId, position, actionId: actionId(), revision: state.revision }, now);
 }
 
 function mustFlip(state: GameState, playerId: string, position: number, now = T0 + 1_000) {
@@ -19,7 +19,7 @@ describe('turn management', () => {
 	test('the first player in the turn order receives the first turn', () => {
 		const state = newGame();
 		expect(state.activePlayerId).toBe(state.turnOrder[0]);
-		expect(state.turnUntil).toBe(T0 + TURN_TIME_LIMIT_MS);
+		expect(state.revealUntil).toBeNull();
 	});
 
 	test('only the active player can flip', () => {
@@ -28,13 +28,6 @@ describe('turn management', () => {
 		const result = flip(state, other!, 0);
 		expect(result).toMatchObject({ ok: false, error: 'not_your_turn' });
 		expect(result.state).toBe(state);
-	});
-
-	test('flips are limited to the active player’s own board', () => {
-		const state = newGame();
-		const [active, other] = state.turnOrder;
-		const result = flip(state, active!, 0, T0 + 1_000, other!);
-		expect(result).toMatchObject({ ok: false, error: 'not_your_board' });
 	});
 
 	test('cards are flipped one at a time: the first flip is pending', () => {
@@ -46,16 +39,14 @@ describe('turn management', () => {
 		expect(after.revision).toBe(state.revision + 1);
 	});
 
-	test('a successful match retains the turn and resets the deadline', () => {
+	test('a successful match retains the turn and the pair stays matched on the shared board', () => {
 		const state = newGame();
 		const active = state.activePlayerId!;
 		const [[a, b]] = matchingPositions(state) as [[number, number]];
-		const now = T0 + 30_000;
-		const after = mustFlip(mustFlip(state, active, a, now), active, b, now);
+		const after = mustFlip(mustFlip(state, active, a), active, b);
 		expect(after.activePlayerId).toBe(active);
 		expect(after.firstFlip).toBeNull();
-		expect(after.turnUntil).toBe(now + TURN_TIME_LIMIT_MS);
-		expect(after.players[active]!.matched).toEqual([a, b].sort((x, y) => x - y));
+		expect(after.matchedBy).toEqual({ [a]: active, [b]: active });
 	});
 
 	test('a failed match reveals both cards, then advances the turn', () => {
@@ -66,7 +57,6 @@ describe('turn management', () => {
 		const after = mustFlip(mustFlip(state, first, a, now), first, b, now);
 		expect(after.mismatch).toEqual([a, b]);
 		expect(after.revealUntil).toBe(now + REVEAL_INTERVAL_MS);
-		expect(after.turnUntil).toBeNull();
 		expect(after.activePlayerId).toBe(first);
 
 		// Before the reveal ends, nothing changes and further flips are refused.
@@ -76,19 +66,26 @@ describe('turn management', () => {
 
 		const resolved = resolveOverdue(after, now + REVEAL_INTERVAL_MS);
 		expect(resolved.mismatch).toBeNull();
+		expect(resolved.revealUntil).toBeNull();
 		expect(resolved.activePlayerId).toBe(second);
-		expect(resolved.turnUntil).toBe(now + REVEAL_INTERVAL_MS + TURN_TIME_LIMIT_MS);
 	});
 
-	test('matching on one player’s board does not change any other board', () => {
-		const state = newGame();
-		const active = state.activePlayerId!;
-		const [[a, b]] = matchingPositions(state) as [[number, number]];
-		const after = mustFlip(mustFlip(state, active, a), active, b);
-		for (const id of state.turnOrder.filter((p) => p !== active)) {
-			expect(after.players[id]!.matched).toEqual([]);
-			expect(after.players[id]!.score).toBe(0);
-		}
+	test('matched cards stay face up when the turn passes, and nobody can flip them again', () => {
+		let state = newGame();
+		const [first, second] = state.turnOrder as [string, string, string];
+		const pairs = matchingPositions(state);
+		const [a, b] = pairs[0]!;
+		// First player matches a pair, then misses.
+		state = mustFlip(mustFlip(state, first, a), first, b);
+		const [x, y] = nonMatchingPositions(state, new Set([a, b]));
+		state = mustFlip(mustFlip(state, first, x), first, y);
+		state = resolveOverdue(state, T0 + 1_000 + REVEAL_INTERVAL_MS);
+		expect(state.activePlayerId).toBe(second);
+		// The pair is still matched, credited to the first player.
+		expect(state.matchedBy).toEqual({ [a]: first, [b]: first });
+		expect(flip(state, second, a)).toMatchObject({ ok: false, error: 'already_matched' });
+		expect(state.players[second]!.score).toBe(0);
+		expect(state.players[first]!.score).toBe(1);
 	});
 
 	test('invalid actions do not change the turn or the state', () => {
@@ -115,7 +112,7 @@ describe('turn management', () => {
 	test('a stale revision is rejected', () => {
 		const state = newGame();
 		const active = state.activePlayerId!;
-		const result = flipCard(state, { playerId: active, boardPlayerId: active, position: 0, actionId: actionId(), revision: state.revision - 1 }, T0);
+		const result = flipCard(state, { playerId: active, position: 0, actionId: actionId(), revision: state.revision - 1 }, T0);
 		expect(result).toMatchObject({ ok: false, error: 'stale_state' });
 	});
 
@@ -134,9 +131,9 @@ describe('turn management', () => {
 		expect(nextPlayer(order, 'a', () => false)).toBeNull();
 	});
 
-	test('nextDeadline prefers the reveal deadline and is null when completed', () => {
-		expect(nextDeadline({ status: 'active', revealUntil: 5, turnUntil: null })).toBe(5);
-		expect(nextDeadline({ status: 'active', revealUntil: null, turnUntil: 9 })).toBe(9);
-		expect(nextDeadline({ status: 'completed', revealUntil: null, turnUntil: null })).toBeNull();
+	test('nextDeadline is the reveal deadline, and null when there is none or the game is over', () => {
+		expect(nextDeadline({ status: 'active', revealUntil: 5 })).toBe(5);
+		expect(nextDeadline({ status: 'active', revealUntil: null })).toBeNull();
+		expect(nextDeadline({ status: 'completed', revealUntil: null })).toBeNull();
 	});
 });

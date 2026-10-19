@@ -4,7 +4,7 @@ import { readJson, sessionRequest } from '$lib/server/sessions/api-guard';
 import { flipRequestSchema } from '$lib/server/validation';
 import type { RequestHandler } from './$types';
 
-/** Flip one card: {boardPlayerId, position, actionId, revision}. */
+/** Matchen: flip one card on the shared board: {position, actionId, revision}. */
 export const POST: RequestHandler = async (event) => {
 	const req = sessionRequest(event);
 	if (!req.ok) return req.response;

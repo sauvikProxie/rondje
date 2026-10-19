@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { SessionSync } from '$lib/client/session-sync.svelte';
+	import BlanksTable from '$lib/components/game/BlanksTable.svelte';
 	import GameTable from '$lib/components/game/GameTable.svelte';
 	import ResultsView from '$lib/components/game/ResultsView.svelte';
 	import LobbyView from '$lib/components/lobby/LobbyView.svelte';
@@ -50,7 +51,11 @@
 				<LobbyView {view} online={sync.online} />
 			{:else if status === 'in_progress' && view.game}
 				<h1 class="sr-only">{view.session.name}: game in progress</h1>
-				<GameTable {sync} />
+				{#if view.session.mode === 'fill_blanks'}
+					<BlanksTable {sync} />
+				{:else}
+					<GameTable {sync} />
+				{/if}
 			{:else}
 				<ResultsView {view} />
 				<p class="mt-6 text-center"><a href="/" class="btn-ghost">Back to the start page</a></p>

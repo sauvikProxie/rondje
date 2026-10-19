@@ -4,7 +4,7 @@
 	import Alert from '$lib/components/shared/Alert.svelte';
 	import ConfirmButton from '$lib/components/shared/ConfirmButton.svelte';
 	import StatusBadge from '$lib/components/shared/StatusBadge.svelte';
-	import VariantBadge from '$lib/components/shared/VariantBadge.svelte';
+	import GameBadge from '$lib/components/shared/GameBadge.svelte';
 	import { formatDateTime } from '$lib/utils/format';
 
 	let { data } = $props();
@@ -55,7 +55,7 @@
 					<div class="min-w-0 flex-1">
 						<div class="flex flex-wrap items-center gap-2">
 							<StatusBadge status={session.status} />
-							<VariantBadge variant={session.variant} pairCount={session.pair_count} />
+							<GameBadge mode={session.mode} variant={session.variant} pairCount={session.pair_count} groupCount={session.group_count} />
 						</div>
 						<h2 class="mt-2 truncate text-lg font-extrabold">{session.name}</h2>
 						<p class="mt-0.5 text-sm text-ink-soft">

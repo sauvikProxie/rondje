@@ -56,14 +56,23 @@ export interface JoinSessionResult extends RpcEnvelope {
 export const rpc = {
 	createSession: (
 		supabase: Client,
-		args: { name: string; variant: string; pairCount: number; scheduledAt: string | null }
+		args: {
+			name: string;
+			mode: string;
+			variant: string | null;
+			pairCount: number;
+			groupCount: number;
+			scheduledAt: string | null;
+		}
 	) =>
 		call<CreateSessionResult>(
 			'create_session',
 			supabase.rpc('create_session', {
 				p_name: args.name,
+				p_mode: args.mode,
 				p_variant: args.variant,
 				p_pair_count: args.pairCount,
+				p_group_count: args.groupCount,
 				p_scheduled_at: args.scheduledAt
 			})
 		),
@@ -100,18 +109,27 @@ export const rpc = {
 			supabase.rpc('remove_player', { p_session_id: sessionId, p_player_id: playerId })
 		),
 
-	flipCard: (
-		supabase: Client,
-		args: { sessionId: string; boardPlayerId: string; position: number; actionId: string; revision: number }
-	) =>
+	skipTurn: (supabase: Client, sessionId: string) =>
+		call<ActionResult>('skip_turn', supabase.rpc('skip_turn', { p_session_id: sessionId })),
+
+	flipCard: (supabase: Client, args: { sessionId: string; position: number; actionId: string; revision: number }) =>
 		call<ActionResult>(
 			'flip_card',
 			supabase.rpc('flip_card', {
 				p_session_id: args.sessionId,
-				p_board_player_id: args.boardPlayerId,
 				p_position: args.position,
 				p_action_id: args.actionId,
 				p_revision: args.revision
+			})
+		),
+
+	submitAnswer: (supabase: Client, args: { sessionId: string; round: number; answer: string }) =>
+		call<ActionResult>(
+			'submit_answer',
+			supabase.rpc('submit_answer', {
+				p_session_id: args.sessionId,
+				p_round: args.round,
+				p_answer: args.answer
 			})
 		)
 };

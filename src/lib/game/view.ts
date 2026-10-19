@@ -16,6 +16,8 @@ export interface BoardCell {
 	face: CardFace | null;
 	/** True for the two cards of a pending mismatch reveal. */
 	mismatch: boolean;
+	/** Player who found the pair, for matched cells. */
+	matchedBy: string | null;
 }
 
 /** Positions currently face up in the active attempt (first flip or mismatch reveal). */
@@ -24,29 +26,26 @@ export function flippedPositions(game: ViewGame): number[] {
 	return game.first_flip === null ? [] : [game.first_flip];
 }
 
-/** The cells of one player's board as the caller is allowed to see them (spec 8.2). */
-export function boardCells(game: ViewGame, boardPlayerId: string): BoardCell[] {
-	const matched = new Set(game.boards[boardPlayerId] ?? []);
-	const isActiveBoard = game.active_player_id === boardPlayerId;
-	const flipped = new Set(isActiveBoard ? flippedPositions(game) : []);
-	const mismatch = new Set(isActiveBoard ? (game.mismatch_positions ?? []) : []);
+/** The cells of the shared Matchen board as the caller is allowed to see them (spec 8.2). */
+export function boardCells(game: ViewGame): BoardCell[] {
+	const flipped = new Set(flippedPositions(game));
+	const mismatch = new Set(game.mismatch_positions ?? []);
 
 	return Array.from({ length: game.card_count }, (_, position) => {
-		const state: CellState = matched.has(position)
-			? 'matched'
-			: flipped.has(position)
-				? 'flipped'
-				: 'hidden';
+		const key = String(position);
+		const matched = Object.hasOwn(game.matched, key);
+		const state: CellState = matched ? 'matched' : flipped.has(position) ? 'flipped' : 'hidden';
 		return {
 			position,
 			state,
-			face: state === 'hidden' ? null : (game.faces[String(position)] ?? null),
-			mismatch: mismatch.has(position)
+			face: state === 'hidden' ? null : (game.faces[key] ?? null),
+			mismatch: mismatch.has(position),
+			matchedBy: matched ? (game.matched[key] ?? null) : null
 		};
 	});
 }
 
-/** Why the caller cannot flip `position` on their own board right now, or null if they can. */
+/** Why the caller cannot flip `position` right now, or null if they can. */
 export function flipBlockReason(view: SessionView, position: number): FlipRuleError | 'not_a_player' | null {
 	const game = view.game;
 	if (!view.me || !game) return 'not_a_player';
@@ -57,9 +56,8 @@ export function flipBlockReason(view: SessionView, position: number): FlipRuleEr
 			revealPending: game.mismatch_positions !== null,
 			firstFlip: game.first_flip,
 			cardCount: game.card_count,
-			matched: new Set(game.boards[view.me] ?? [])
+			matched: new Set(Object.keys(game.matched).map(Number))
 		},
-		view.me,
 		view.me,
 		position
 	);
@@ -86,8 +84,9 @@ export function faceLabel(face: CardFace): string {
 	return face.kind === 'image' ? `picture ${face.emoji}` : faceText(face);
 }
 
-export function matchedPairs(game: ViewGame, playerId: string): number {
-	return Math.floor((game.boards[playerId]?.length ?? 0) / 2);
+/** Pairs left on the shared board. */
+export function pairsLeft(game: ViewGame): number {
+	return Math.max(0, (game.card_count - Object.keys(game.matched).length) / 2);
 }
 
 export function playerById(view: SessionView, id: string | null | undefined): ViewPlayer | undefined {
@@ -101,4 +100,15 @@ export function playersInTurnOrder(view: SessionView): ViewPlayer[] {
 	return order
 		.map((id) => view.players.find((p) => p.id === id))
 		.filter((p): p is ViewPlayer => p !== undefined);
+}
+
+/** "Group 2". */
+export function groupLabel(group: number): string {
+	return `Group ${group}`;
+}
+
+/** Score unit for the session's game: "pair(s)" or "correct". */
+export function scoreUnit(view: Pick<SessionView, 'session'>, score: number): string {
+	if (view.session.mode === 'fill_blanks') return 'correct';
+	return score === 1 ? 'pair' : 'pairs';
 }

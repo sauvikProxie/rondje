@@ -6,8 +6,10 @@ import type { Actions } from './$types';
 
 const FIELD_FOR_ERROR: Record<string, string> = {
 	invalid_session_name: 'name',
+	invalid_mode: 'mode',
 	invalid_variant: 'variant',
-	invalid_pair_count: 'pairCount'
+	invalid_pair_count: 'pairCount',
+	invalid_group_count: 'groupCount'
 };
 
 export const actions: Actions = {
@@ -15,8 +17,10 @@ export const actions: Actions = {
 		const data = Object.fromEntries(await request.formData());
 		const values = {
 			name: String(data.name ?? ''),
+			mode: String(data.mode ?? ''),
 			variant: String(data.variant ?? ''),
 			pairCount: String(data.pairCount ?? ''),
+			groupCount: String(data.groupCount ?? ''),
 			scheduledLocal: String(data.scheduledLocal ?? '')
 		};
 		const parsed = createSessionSchema.safeParse(data);

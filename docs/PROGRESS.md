@@ -162,6 +162,34 @@ anonymous sign-ins and email/password, disable Realtime public access, put
 `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` and
 `SUPABASE_SECRET_KEY` in `.env`, then run `npm run test:e2e`.
 
+## Changes after the rebuild (2026-10-19, spec section 23)
+
+Requested: remove the timer, add groups with a scorecard per group, fix
+matched cards flipping back when the turn passes, add a Fill in the Blanks
+mode (Beginner: four options; Advanced: type the answer).
+
+- The "flip-back glitch" was the per-player board design: the view followed
+  the active player's board, where the previous player's pairs were not
+  matched. Matchen now uses one shared board (product decision: classic
+  memory).
+- Groups are teams in one game (product decision); Fill in the Blanks rounds
+  are answered by everyone at once, with the answer mode taken from each
+  player's level (product decisions).
+- The turn timer is gone; the host can skip a stalled turn or close a round.
+- `schema.sql` upgrades an existing project in place. Checked in PGlite by
+  applying the previous committed schema and seed with old-style data, then
+  the new schema and seed (twice).
+
+| Command | Result |
+|---|---|
+| `npm run check` | 606 files, 0 errors, 0 warnings |
+| `npm run build` | success |
+| `npm test` | 10 files, 196 tests passed |
+| `npx playwright test tests/e2e/responsive.spec.ts` | 85 passed (13 screens incl. groups and Fill in the Blanks, 5 viewports) |
+| `tests/e2e/multiplayer.spec.ts` | **not run**: the live project still has the previous schema; apply `schema.sql` and `seed.sql` first |
+
 ## Open issues
 
-- None known in code. The items above need a live Supabase project.
+- Apply the updated `supabase/schema.sql` and `supabase/seed.sql` to the
+  Supabase project, then run `npm run test:e2e` (both multiplayer journeys are
+  unverified against live Supabase).

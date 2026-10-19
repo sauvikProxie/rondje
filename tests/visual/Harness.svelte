@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { SessionSync } from '$lib/client/session-sync.svelte';
+	import BlanksTable from '$lib/components/game/BlanksTable.svelte';
 	import GameTable from '$lib/components/game/GameTable.svelte';
 	import ResultsView from '$lib/components/game/ResultsView.svelte';
 	import LobbyView from '$lib/components/lobby/LobbyView.svelte';
@@ -14,12 +15,16 @@
 	const fake = $state({
 		view: scene(name, cards),
 		online: new Set(['p1', 'p2', 'p5', 'host']) as ReadonlySet<string>,
-		now: Date.now(),
 		busy: false,
 		pendingFlip: null as number | null,
+		pendingAnswer: null as string | null,
 		connection: 'live' as const,
 		flip(position: number) {
 			fake.pendingFlip = position;
+		},
+		async answer(text: string) {
+			fake.pendingAnswer = text;
+			return true;
 		}
 	});
 	const sync = fake as unknown as SessionSync;
@@ -38,6 +43,8 @@
 	<main id="main" class="safe-bottom flex-1 pb-8">
 		{#if view.session.status === 'lobby'}
 			<LobbyView {view} online={fake.online} />
+		{:else if view.session.status === 'in_progress' && view.session.mode === 'fill_blanks'}
+			<BlanksTable {sync} />
 		{:else if view.session.status === 'in_progress'}
 			<GameTable {sync} />
 		{:else}

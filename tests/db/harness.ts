@@ -138,23 +138,39 @@ export class TestDb {
 		return this.createUser({ anonymous: false });
 	}
 
-	async createSession(host: User, variant = 'word_image', pairCount = 6) {
+	/** A Matchen session. */
+	async createSession(host: User, variant = 'word_image', pairCount = 6, groupCount = 1) {
 		const res = await this.rpc(host, 'create_session', {
 			p_name: 'Test session',
+			p_mode: 'matchen',
 			p_variant: variant,
-			p_pair_count: pairCount
+			p_pair_count: pairCount,
+			p_group_count: groupCount
 		});
 		if (!res.ok) throw new Error(`create_session failed: ${res.error}`);
 		return { sessionId: res.session_id as string, joinCode: res.join_code as string };
 	}
 
-	async join(joinCode: string, nickname: string, avatar = '🦊') {
+	/** A Fill in the Blanks session with `sentences` rounds. */
+	async createBlanksSession(host: User, sentences = 6, groupCount = 1) {
+		const res = await this.rpc(host, 'create_session', {
+			p_name: 'Grammar session',
+			p_mode: 'fill_blanks',
+			p_variant: null,
+			p_pair_count: sentences,
+			p_group_count: groupCount
+		});
+		if (!res.ok) throw new Error(`create_session failed: ${res.error}`);
+		return { sessionId: res.session_id as string, joinCode: res.join_code as string };
+	}
+
+	async join(joinCode: string, nickname: string, avatar = '🦊', level = 'beginner') {
 		const user = await this.createUser();
 		const res = await this.rpc(user, 'join_session', {
 			p_join_code: joinCode,
 			p_nickname: nickname,
 			p_avatar: avatar,
-			p_level: 'beginner'
+			p_level: level
 		});
 		if (!res.ok) throw new Error(`join_session failed: ${res.error}`);
 		return { user, playerId: res.player_id as string };
@@ -191,22 +207,43 @@ export class TestDb {
 		return [...byPair.values()].map((p) => [p[0]!, p[1]!]);
 	}
 
-	async flip(user: User, sessionId: string, boardPlayerId: string, position: number, opts: { actionId?: string; revision?: number } = {}) {
+	/** Matchen: flip a card on the shared board. */
+	async flip(user: User, sessionId: string, position: number, opts: { actionId?: string; revision?: number } = {}) {
 		return this.rpc(user, 'flip_card', {
 			p_session_id: sessionId,
-			p_board_player_id: boardPlayerId,
 			p_position: position,
 			p_action_id: opts.actionId ?? crypto.randomUUID(),
 			p_revision: opts.revision ?? (await this.revision(sessionId))
 		});
 	}
 
-	/** Move all game deadlines into the past, simulating elapsed time. */
+	/** Fill in the Blanks: answer a round (default: the current round). */
+	async answer(user: User, sessionId: string, answer: string, round?: number) {
+		return this.rpc(user, 'submit_answer', {
+			p_session_id: sessionId,
+			p_round: round ?? (await this.game(sessionId)).current_round,
+			p_answer: answer
+		});
+	}
+
+	/** Fill in the Blanks: the current round's question (read as superuser). */
+	async currentQuestion(sessionId: string): Promise<{ round: number; answer: string; distractors: string[]; options: string[] }> {
+		const rows = await this.sql<any>(
+			`select r.round, q.answer, q.distractors, r.options
+			 from public.games g
+			 join public.game_rounds r on r.game_id = g.id and r.round = g.current_round
+			 join public.grammar_questions q on q.id = r.question_id
+			 where g.session_id = $1`,
+			[sessionId]
+		);
+		return rows[0];
+	}
+
+	/** Move the reveal deadline into the past, simulating elapsed time. */
 	async expireDeadlines(sessionId: string) {
 		await this.sql(
 			`update public.games set
-				reveal_until = case when reveal_until is null then null else now() - interval '1 second' end,
-				turn_until = case when turn_until is null then null else now() - interval '1 second' end
+				reveal_until = case when reveal_until is null then null else now() - interval '1 second' end
 			 where session_id = $1`,
 			[sessionId]
 		);

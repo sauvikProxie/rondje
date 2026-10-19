@@ -1,13 +1,16 @@
 import { z } from 'zod';
 import {
 	AVATARS,
+	GAME_MODES,
 	JOIN_CODE_PATTERN,
+	MAX_GROUPS,
 	NICKNAME_MAX_LENGTH,
 	PAIR_COUNTS,
 	PROFICIENCY_LEVELS,
 	SESSION_NAME_MAX_LENGTH,
 	VARIANTS
 } from '$lib/game/constants';
+import { ANSWER_MAX_LENGTH } from '$lib/game/blanks';
 
 /**
  * Centralised server-side validation (spec 15.4). The database functions
@@ -36,32 +39,49 @@ export const joinFormSchema = z.object({
 	level: z.enum(PROFICIENCY_LEVELS, 'Please choose your Dutch level.')
 });
 
-export const createSessionSchema = z.object({
-	name: z
-		.string()
-		.trim()
-		.min(1, 'Please give the session a name.')
-		.max(SESSION_NAME_MAX_LENGTH, `Session names can be at most ${SESSION_NAME_MAX_LENGTH} characters.`),
-	variant: z.enum(VARIANTS, 'Please choose a game variant.'),
-	pairCount: z.coerce
-		.number('Please choose the number of pairs.')
-		.int()
-		.refine((value) => (PAIR_COUNTS as readonly number[]).includes(value), 'Choose 6, 8 or 12 pairs.'),
-	/** ISO 8601 timestamp produced by the browser from the local date/time, or empty. */
-	scheduledAt: z
-		.string()
-		.trim()
-		.optional()
-		.transform((value, ctx) => {
-			if (!value) return null;
-			const date = new Date(value);
-			if (Number.isNaN(date.getTime()) || date.getFullYear() < 2000 || date.getFullYear() > 2100) {
-				ctx.addIssue({ code: 'custom', message: 'Please enter a valid date and time.' });
-				return z.NEVER;
-			}
-			return date.toISOString();
-		})
-});
+export const createSessionSchema = z
+	.object({
+		name: z
+			.string()
+			.trim()
+			.min(1, 'Please give the session a name.')
+			.max(SESSION_NAME_MAX_LENGTH, `Session names can be at most ${SESSION_NAME_MAX_LENGTH} characters.`),
+		mode: z.enum(GAME_MODES, 'Please choose a game.'),
+		/** Matchen only; ignored for Fill in the Blanks. */
+		variant: z.string().optional(),
+		pairCount: z.coerce
+			.number('Please choose the number of pairs or sentences.')
+			.int()
+			.refine((value) => (PAIR_COUNTS as readonly number[]).includes(value), 'Choose 6, 8 or 12.'),
+		groupCount: z.coerce
+			.number('Please choose the number of groups.')
+			.int()
+			.min(1, 'Choose no groups, or 2 to 4 groups.')
+			.max(MAX_GROUPS, 'Choose no groups, or 2 to 4 groups.'),
+		/** ISO 8601 timestamp produced by the browser from the local date/time, or empty. */
+		scheduledAt: z
+			.string()
+			.trim()
+			.optional()
+			.transform((value, ctx) => {
+				if (!value) return null;
+				const date = new Date(value);
+				if (Number.isNaN(date.getTime()) || date.getFullYear() < 2000 || date.getFullYear() > 2100) {
+					ctx.addIssue({ code: 'custom', message: 'Please enter a valid date and time.' });
+					return z.NEVER;
+				}
+				return date.toISOString();
+			})
+	})
+	.transform((value, ctx) => {
+		if (value.mode === 'fill_blanks') return { ...value, variant: null };
+		const variant = VARIANTS.find((v) => v === value.variant);
+		if (!variant) {
+			ctx.addIssue({ code: 'custom', path: ['variant'], message: 'Please choose a game variant.' });
+			return z.NEVER;
+		}
+		return { ...value, variant };
+	});
 
 export const credentialsSchema = z.object({
 	email: z.string().trim().toLowerCase().pipe(z.email('Please enter a valid email address.')),
@@ -78,10 +98,19 @@ export const signUpSchema = credentialsSchema.extend({
 export const uuidSchema = z.uuid();
 
 export const flipRequestSchema = z.object({
-	boardPlayerId: z.uuid(),
 	position: z.number().int().min(0).max(23),
 	actionId: z.uuid(),
 	revision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER)
+});
+
+export const answerRequestSchema = z.object({
+	round: z.number().int().min(0).max(11),
+	answer: z
+		.string()
+		.trim()
+		.min(1)
+		.refine((value) => codePoints(value) <= ANSWER_MAX_LENGTH)
+		.refine((value) => !/\p{Cc}/u.test(value))
 });
 
 /** First error message per top-level field. */

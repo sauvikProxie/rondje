@@ -2,6 +2,7 @@
 	import ConfirmButton from '$lib/components/shared/ConfirmButton.svelte';
 	import PlayerAvatar from '$lib/components/shared/PlayerAvatar.svelte';
 	import { LEVEL_LABELS } from '$lib/game/constants';
+	import { groupLabel } from '$lib/game/view';
 	import type { ViewPlayer } from '$lib/types/session-view';
 
 	let {
@@ -46,6 +47,7 @@
 					{#if player.id === me}<span class="pill ml-1 bg-teal-soft align-middle text-teal-deep">You</span>{/if}
 				</p>
 				<p class="text-sm text-ink-soft">
+					{#if player.group}{groupLabel(player.group)} ·{/if}
 					{LEVEL_LABELS[player.level]} ·
 					{#if player.status === 'removed'}removed{:else}{isOnline ? 'online' : 'offline'}{/if}
 				</p>
