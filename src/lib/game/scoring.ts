@@ -35,21 +35,24 @@ export function topScorers(players: readonly ScoredPlayer[]): string[] {
  * Final rankings (spec 10.3). Active players are ranked by score with
  * standard competition ranking, so tied players share a rank. Removed
  * players keep their score but are listed last without a rank and cannot
- * win. `winnerIds` comes from the persisted game result.
+ * win. `winnerIds` comes from the persisted game result. `scoreOf` picks
+ * the points to rank by (default: the current game's score; the session
+ * standings rank by the running total).
  */
 export function rankPlayers<T extends ScoredPlayer>(
 	players: readonly T[],
-	winnerIds: readonly string[]
+	winnerIds: readonly string[],
+	scoreOf: (player: T) => number = (player) => player.score
 ): RankedPlayer<T>[] {
 	const winners = new Set(winnerIds);
-	const byScore = (a: T, b: T) => b.score - a.score;
+	const byScore = (a: T, b: T) => scoreOf(b) - scoreOf(a);
 	const active = players.filter((p) => p.status === 'active').sort(byScore);
 	const removed = players.filter((p) => p.status === 'removed').sort(byScore);
 
 	const ranked: RankedPlayer<T>[] = [];
 	active.forEach((player, index) => {
 		const previous = ranked[index - 1];
-		const rank = previous && previous.player.score === player.score ? previous.rank : index + 1;
+		const rank = previous && scoreOf(previous.player) === scoreOf(player) ? previous.rank : index + 1;
 		ranked.push({ player, rank, isWinner: winners.has(player.id) });
 	});
 	for (const player of removed) ranked.push({ player, rank: null, isWinner: false });

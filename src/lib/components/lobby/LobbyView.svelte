@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SessionStandings from '$lib/components/game/SessionStandings.svelte';
 	import GameBadge from '$lib/components/shared/GameBadge.svelte';
 	import { answerModeFor } from '$lib/game/blanks';
 	import { MODE_INFO, VARIANT_INFO } from '$lib/game/constants';
@@ -11,6 +12,7 @@
 	const activePlayers = $derived(view.players.filter((p) => p.status === 'active'));
 	const me = $derived(view.players.find((p) => p.id === view.me));
 	const info = $derived(session.mode === 'matchen' && session.variant ? VARIANT_INFO[session.variant] : MODE_INFO[session.mode]);
+	const gamesPlayed = $derived(view.history.length);
 </script>
 
 <div class="mx-auto max-w-xl space-y-4">
@@ -40,7 +42,7 @@
 				<span class="size-2 animate-bounce rounded-full bg-teal-deep [animation-delay:-0.15s]"></span>
 				<span class="size-2 animate-bounce rounded-full bg-teal-deep"></span>
 			</span>
-			Waiting for the host to start the game…
+			{gamesPlayed > 0 ? `Waiting for the host to start game ${gamesPlayed + 1}…` : 'Waiting for the host to start the game…'}
 		</div>
 	</section>
 
@@ -48,6 +50,8 @@
 		<h2 id="players-heading" class="text-lg font-extrabold">In the lobby</h2>
 		<ParticipantList players={view.players} {online} me={view.me} hostOnline={online.has('host')} />
 	</section>
+
+	{#if gamesPlayed > 0}<SessionStandings {view} />{/if}
 
 	<p class="text-center text-sm text-ink-soft">
 		{#if session.mode === 'matchen'}

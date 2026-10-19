@@ -27,6 +27,7 @@ const APP_PAGES = [
 const SCENES = [
 	{ name: 'lobby', query: 'scene=lobby&pairs=8' },
 	{ name: 'lobby-blanks', query: 'scene=lobby-blanks&pairs=8' },
+	{ name: 'lobby-next', query: 'scene=lobby-next&pairs=8' },
 	{ name: 'game-6', query: 'scene=game&pairs=6' },
 	{ name: 'game-8', query: 'scene=game&pairs=8' },
 	{ name: 'game-12', query: 'scene=game&pairs=12' },
@@ -37,7 +38,8 @@ const SCENES = [
 	{ name: 'blanks-reveal', query: 'scene=blanks-reveal&pairs=8' },
 	{ name: 'results', query: 'scene=results&pairs=8' },
 	{ name: 'results-tie', query: 'scene=results-tie&pairs=12' },
-	{ name: 'results-groups', query: 'scene=results-groups&pairs=8' }
+	{ name: 'results-groups', query: 'scene=results-groups&pairs=8' },
+	{ name: 'results-session', query: 'scene=results-session&pairs=8' }
 ];
 
 async function expectNoHorizontalOverflow(page: Page) {

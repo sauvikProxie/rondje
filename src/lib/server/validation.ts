@@ -8,7 +8,8 @@ import {
 	PAIR_COUNTS,
 	PROFICIENCY_LEVELS,
 	SESSION_NAME_MAX_LENGTH,
-	VARIANTS
+	VARIANTS,
+	type GameMode
 } from '$lib/game/constants';
 import { ANSWER_MAX_LENGTH } from '$lib/game/blanks';
 
@@ -39,6 +40,36 @@ export const joinFormSchema = z.object({
 	level: z.enum(PROFICIENCY_LEVELS, 'Please choose your Dutch level.')
 });
 
+/** Settings of one game: used when creating a session and when setting up its next game. */
+const gameConfigFields = {
+	mode: z.enum(GAME_MODES, 'Please choose a game.'),
+	/** Matchen only; ignored for Fill in the Blanks. */
+	variant: z.string().optional(),
+	pairCount: z.coerce
+		.number('Please choose the number of pairs or sentences.')
+		.int()
+		.refine((value) => (PAIR_COUNTS as readonly number[]).includes(value), 'Choose 6, 8 or 12.'),
+	groupCount: z.coerce
+		.number('Please choose the number of groups.')
+		.int()
+		.min(1, 'Choose no groups, or 2 to 4 groups.')
+		.max(MAX_GROUPS, 'Choose no groups, or 2 to 4 groups.')
+};
+
+/** Matchen needs a valid variant; Fill in the Blanks has none. */
+function resolveVariant<T extends { mode: GameMode; variant?: string }>(value: T, ctx: z.RefinementCtx<T>) {
+	if (value.mode === 'fill_blanks') return { ...value, variant: null };
+	const variant = VARIANTS.find((v) => v === value.variant);
+	if (!variant) {
+		ctx.addIssue({ code: 'custom', path: ['variant'], message: 'Please choose a game variant.' });
+		return z.NEVER;
+	}
+	return { ...value, variant };
+}
+
+/** Host: settings of the session's next game. */
+export const gameConfigSchema = z.object(gameConfigFields).transform(resolveVariant);
+
 export const createSessionSchema = z
 	.object({
 		name: z
@@ -46,18 +77,7 @@ export const createSessionSchema = z
 			.trim()
 			.min(1, 'Please give the session a name.')
 			.max(SESSION_NAME_MAX_LENGTH, `Session names can be at most ${SESSION_NAME_MAX_LENGTH} characters.`),
-		mode: z.enum(GAME_MODES, 'Please choose a game.'),
-		/** Matchen only; ignored for Fill in the Blanks. */
-		variant: z.string().optional(),
-		pairCount: z.coerce
-			.number('Please choose the number of pairs or sentences.')
-			.int()
-			.refine((value) => (PAIR_COUNTS as readonly number[]).includes(value), 'Choose 6, 8 or 12.'),
-		groupCount: z.coerce
-			.number('Please choose the number of groups.')
-			.int()
-			.min(1, 'Choose no groups, or 2 to 4 groups.')
-			.max(MAX_GROUPS, 'Choose no groups, or 2 to 4 groups.'),
+		...gameConfigFields,
 		/** ISO 8601 timestamp produced by the browser from the local date/time, or empty. */
 		scheduledAt: z
 			.string()
@@ -73,15 +93,7 @@ export const createSessionSchema = z
 				return date.toISOString();
 			})
 	})
-	.transform((value, ctx) => {
-		if (value.mode === 'fill_blanks') return { ...value, variant: null };
-		const variant = VARIANTS.find((v) => v === value.variant);
-		if (!variant) {
-			ctx.addIssue({ code: 'custom', path: ['variant'], message: 'Please choose a game variant.' });
-			return z.NEVER;
-		}
-		return { ...value, variant };
-	});
+	.transform(resolveVariant);
 
 export const credentialsSchema = z.object({
 	email: z.string().trim().toLowerCase().pipe(z.email('Please enter a valid email address.')),

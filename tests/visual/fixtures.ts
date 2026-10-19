@@ -44,6 +44,7 @@ const PLAYERS: ViewPlayer[] = [
 	level: (['beginner', 'elementary', 'intermediate', 'advanced'] as const)[i % 4]!,
 	status: 'active' as const,
 	score: score as number,
+	total_score: score as number,
 	group: null,
 	joined_at: iso(-60_000 + i * 1000)
 }));
@@ -78,7 +79,8 @@ function base(
 			ended_at: status === 'completed' ? iso(-1000) : null
 		},
 		players,
-		game: null
+		game: null,
+		history: []
 	};
 }
 
@@ -108,6 +110,7 @@ export function scene(name: string, pairs: 6 | 8 | 12): SessionView {
 		Object.fromEntries(Object.entries(all).filter(([pos]) => pos in matched || extra.includes(Number(pos))));
 
 	const game: ViewGame = {
+		number: 1,
 		status: 'active',
 		card_count,
 		turn_order: PLAYERS.map((p) => p.id),
@@ -202,6 +205,41 @@ export function scene(name: string, pairs: 6 | 8 | 12): SessionView {
 					ended_at: iso(-1000),
 					reveal_until: null,
 					round: null
+				}
+			};
+		}
+		case 'lobby-next':
+		case 'results-session': {
+			// Third game of a session: earlier points carried into the totals.
+			const carried: Record<string, number> = { p1: 9, p2: 4, p3: 6, p4: 2, p5: 5, p6: 7 };
+			const lobby = name === 'lobby-next';
+			const players = PLAYERS.map((p) => ({
+				...p,
+				status: p.id === 'p6' ? ('removed' as const) : p.status,
+				score: lobby ? 0 : p.score,
+				total_score: carried[p.id]! + (lobby ? 0 : p.score)
+			}));
+			const history: SessionView['history'] = [
+				{ number: 1, mode: 'matchen', variant: 'word_image', pair_count: 8, group_count: 1, end_reason: 'board_cleared', winner_ids: ['p1'], winning_groups: [], ended_at: iso(-1_800_000) },
+				{ number: 2, mode: 'fill_blanks', variant: null, pair_count: 6, group_count: 2, end_reason: 'all_rounds_played', winner_ids: ['p1', 'p3', 'p5'], winning_groups: [1], ended_at: iso(-900_000) }
+			];
+			if (lobby) return { ...base('lobby', pairs, players), history };
+			return {
+				...base('completed', pairs, players),
+				history: [
+					...history,
+					{ number: 3, mode: 'matchen', variant: 'de_het', pair_count: pairs, group_count: 1, end_reason: 'board_cleared', winner_ids: ['p1', 'p3'], winning_groups: [], ended_at: iso(-1000) }
+				],
+				game: {
+					...game,
+					number: 3,
+					status: 'completed',
+					active_player_id: null,
+					first_flip: null,
+					end_reason: 'board_cleared',
+					winner_ids: ['p1', 'p3'],
+					ended_at: iso(-1000),
+					faces: all
 				}
 			};
 		}

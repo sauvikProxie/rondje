@@ -16,6 +16,10 @@
 --   * A session plays one of two game modes: Matchen (memory, one shared board
 --     per game) or Fill in the Blanks (everyone answers the same grammar
 --     sentence each round). Players may be split into groups (teams).
+--   * A session can play several games one after another with the same
+--     players: after a game ends the host sets up the next one (any mode) and
+--     the session returns to the lobby. Points carry over into a running
+--     session total; each finished game keeps its own result.
 --   * Clients have no direct access to the board layout, vocabulary, question,
 --     game, round, answer, attempt or action tables. Card content leaves the
 --     database only through private.session_view(), which reveals a position
@@ -214,9 +218,12 @@ create table if not exists public.hosts (
 	created_at timestamptz not null default now()
 );
 
--- 14.2 Game sessions: one session = one game = one shared table.
--- `variant` applies to Matchen only. `pair_count` is the number of pairs in
--- Matchen and the number of sentences (rounds) in Fill in the Blanks.
+-- 14.2 Game sessions: one shared table that plays one game at a time. The
+-- game settings are those of the current (or next) game; each game keeps a
+-- copy of its own. `variant` applies to Matchen only. `pair_count` is the
+-- number of pairs in Matchen and the number of sentences (rounds) in Fill in
+-- the Blanks. `status` is the state of the current game: back in 'lobby'
+-- while the host sets up the next one.
 create table if not exists public.game_sessions (
 	id uuid primary key default gen_random_uuid(),
 	host_id uuid not null references public.hosts (id) on delete cascade,
@@ -257,10 +264,14 @@ create table if not exists public.players (
 	avatar text not null,
 	level public.proficiency_level not null,
 	status public.player_status not null default 'active',
-	-- 14.8 Scores: one point per matched pair or correct sentence, written only
-	-- by flip_card() and submit_answer().
+	-- 14.8 Scores: one point per matched pair or correct sentence in the
+	-- current game, written only by flip_card() and submit_answer().
 	score integer not null default 0,
-	-- Team (1-based), assigned by start_game() when the session uses groups.
+	-- Points from the session's earlier games; the session total is
+	-- carried_score + score. Moved over by configure_game().
+	carried_score integer not null default 0,
+	-- Team (1-based) in the current game, assigned by start_game() when the
+	-- game uses groups.
 	group_number smallint,
 	joined_at timestamptz not null default now(),
 	removed_at timestamptz,
@@ -270,6 +281,7 @@ create table if not exists public.players (
 	),
 	constraint players_avatar_allowed check (avatar = any (private.allowed_avatars())),
 	constraint players_score_range check (score between 0 and 12),
+	constraint players_carried_score check (carried_score >= 0),
 	constraint players_removed_consistency check (
 		(status = 'active' and removed_at is null) or (status = 'removed' and removed_at is not null)
 	)
@@ -331,10 +343,18 @@ create index if not exists vocabulary_pairs_variant_idx on public.vocabulary_pai
 create index if not exists vocabulary_pairs_item_a_idx on public.vocabulary_pairs (item_a);
 create index if not exists vocabulary_pairs_item_b_idx on public.vocabulary_pairs (item_b);
 
--- 14.6 Game state: authoritative state of the session's single game.
+-- 14.6 Game state: authoritative state of one game of a session. A session
+-- has at most one active game; earlier games stay as its history.
 create table if not exists public.games (
 	id uuid primary key default gen_random_uuid(),
 	session_id uuid not null references public.game_sessions (id) on delete cascade,
+	-- 1 for the session's first game, then 2, 3, ...
+	game_number smallint not null default 1,
+	-- The settings this game was played with (copied from the session at start).
+	mode public.game_mode not null,
+	variant public.game_variant,
+	pair_count smallint not null,
+	group_count smallint not null,
 	status public.game_status not null default 'active',
 	-- Fixed random turn order (player ids); removed players are skipped.
 	-- With groups the order alternates between groups. Unused by Fill in the
@@ -357,9 +377,9 @@ create table if not exists public.games (
 	winning_groups smallint[] not null default '{}',
 	started_at timestamptz not null default now(),
 	ended_at timestamptz,
-	constraint games_session_key unique (session_id),
 	constraint games_turn_order_size check (cardinality(turn_order) >= 2)
-	-- games_mismatch_shape and games_completion: see "Upgrades" below.
+	-- games_session_number_key, games_mismatch_shape and games_completion:
+	-- see "Upgrades" below.
 );
 
 -- 14.7 Board layout: stored ONCE per game. Never readable by clients. In
@@ -463,8 +483,9 @@ create index if not exists grammar_questions_active_idx on public.grammar_questi
 
 -- -----------------------------------------------------------------------------
 -- Upgrades (idempotent). Bring a project created with an earlier version of
--- this schema up to date: shared Matchen board, no turn timer, groups and Fill
--- in the Blanks. On a fresh install the columns already exist and the
+-- this schema up to date: shared Matchen board, no turn timer, groups, Fill
+-- in the Blanks and several games per session. On a fresh install the columns
+-- already exist and the
 -- constraints are simply re-created. Finish or end running games first: a game
 -- in progress during the upgrade loses its per-player board state.
 --
@@ -505,6 +526,34 @@ alter table public.games add constraint games_completion check (
 
 alter table public.game_layout add column if not exists matched_by uuid references public.players (id) on delete set null;
 alter table public.game_layout add column if not exists matched_at timestamptz;
+
+-- Several games per session: games are numbered and keep their own settings,
+-- and players carry their points over into a running session total.
+alter table public.players add column if not exists carried_score integer not null default 0;
+alter table public.players drop constraint if exists players_carried_score;
+alter table public.players add constraint players_carried_score check (carried_score >= 0);
+
+alter table public.games add column if not exists game_number smallint not null default 1;
+alter table public.games add column if not exists mode public.game_mode;
+alter table public.games add column if not exists variant public.game_variant;
+alter table public.games add column if not exists pair_count smallint;
+alter table public.games add column if not exists group_count smallint;
+-- Games created before this upgrade were the only game of their session.
+update public.games g
+set mode = s.mode, variant = s.variant, pair_count = s.pair_count, group_count = s.group_count
+from public.game_sessions s
+where s.id = g.session_id and g.mode is null;
+alter table public.games alter column mode set not null;
+alter table public.games alter column pair_count set not null;
+alter table public.games alter column group_count set not null;
+alter table public.games drop constraint if exists games_mode_variant;
+alter table public.games add constraint games_mode_variant check (
+	(mode = 'matchen' and variant is not null) or (mode = 'fill_blanks' and variant is null)
+);
+alter table public.games drop constraint if exists games_session_key;
+alter table public.games drop constraint if exists games_session_number_key;
+alter table public.games add constraint games_session_number_key unique (session_id, game_number);
+create unique index if not exists games_one_active_per_session on public.games (session_id) where status = 'active';
 
 -- Functions whose signature changed or that are no longer used.
 drop function if exists public.create_session(text, text, integer, timestamptz);
@@ -856,14 +905,13 @@ set search_path = ''
 as $$
 declare
 	v_game public.games%rowtype;
-	v_round_count smallint;
 begin
 	select * into v_game
 	from public.games
-	where session_id = p_session_id
+	where session_id = p_session_id and status = 'active'
 	for update;
 
-	if not found or v_game.status <> 'active' or v_game.reveal_until is null or v_game.reveal_until > now() then
+	if not found or v_game.reveal_until is null or v_game.reveal_until > now() then
 		return false;
 	end if;
 
@@ -874,8 +922,7 @@ begin
 			active_player_id = private.next_player(v_game.turn_order, v_game.active_player_id)
 		where id = v_game.id;
 	else
-		select s.pair_count into v_round_count from public.game_sessions s where s.id = p_session_id;
-		if v_game.current_round + 1 >= v_round_count then
+		if v_game.current_round + 1 >= v_game.pair_count then
 			perform private.complete_game(p_session_id, 'all_rounds_played');
 		else
 			update public.games
@@ -929,6 +976,7 @@ declare
 	v_level public.proficiency_level;
 	v_players jsonb;
 	v_game_json jsonb;
+	v_history jsonb;
 	v_visible smallint[];
 begin
 	select * into v_session from public.game_sessions where id = p_session_id;
@@ -955,6 +1003,7 @@ begin
 			'level', p.level,
 			'status', p.status,
 			'score', p.score,
+			'total_score', p.carried_score + p.score,
 			'group', p.group_number,
 			'joined_at', p.joined_at
 		) order by p.joined_at, p.id), '[]'::jsonb)
@@ -962,9 +1011,33 @@ begin
 	from public.players p
 	where p.session_id = p_session_id;
 
-	select * into v_game from public.games where session_id = p_session_id;
-	if found then
+	-- Finished games of the session, oldest first (results only, no content).
+	select coalesce(jsonb_agg(jsonb_build_object(
+			'number', g.game_number,
+			'mode', g.mode,
+			'variant', g.variant,
+			'pair_count', g.pair_count,
+			'group_count', g.group_count,
+			'end_reason', g.end_reason,
+			'winner_ids', to_jsonb(g.winner_ids),
+			'winning_groups', to_jsonb(g.winning_groups),
+			'ended_at', g.ended_at
+		) order by g.game_number), '[]'::jsonb)
+	into v_history
+	from public.games g
+	where g.session_id = p_session_id and g.status = 'completed';
+
+	-- The current game: none while the session is in the lobby, otherwise the
+	-- latest one (active, or just finished).
+	if v_session.status <> 'lobby' then
+		select * into v_game from public.games
+		where session_id = p_session_id
+		order by game_number desc
+		limit 1;
+	end if;
+	if v_game.id is not null then
 		v_game_json := jsonb_build_object(
+			'number', v_game.game_number,
 			'status', v_game.status,
 			'turn_order', to_jsonb(v_game.turn_order),
 			'active_player_id', v_game.active_player_id,
@@ -976,7 +1049,7 @@ begin
 			'ended_at', v_game.ended_at
 		);
 
-		if v_session.mode = 'matchen' then
+		if v_game.mode = 'matchen' then
 			-- Visible positions: matched, or flipped in the current attempt /
 			-- pending mismatch reveal. Nothing else is ever revealed.
 			select coalesce(array_agg(l.position), '{}')
@@ -992,7 +1065,7 @@ begin
 			end if;
 
 			v_game_json := v_game_json || jsonb_build_object(
-				'card_count', v_session.pair_count * 2,
+				'card_count', v_game.pair_count * 2,
 				'first_flip', v_game.first_flip,
 				'mismatch_positions', to_jsonb(v_game.mismatch_positions),
 				'faces', (
@@ -1032,7 +1105,7 @@ begin
 				'round', case when v_game.status = 'active' then (
 					select jsonb_build_object(
 						'index', r.round,
-						'count', v_session.pair_count,
+						'count', v_game.pair_count,
 						'phase', case when r.closed_at is null then 'answering' else 'reveal' end,
 						'sentence', q.sentence,
 						'translation', q.translation,
@@ -1092,7 +1165,8 @@ begin
 			'ended_at', v_session.ended_at
 		),
 		'players', v_players,
-		'game', v_game_json
+		'game', v_game_json,
+		'history', v_history
 	);
 end;
 $$;
@@ -1119,6 +1193,29 @@ immutable
 set search_path = ''
 as $$
 	select jsonb_build_object('ok', false, 'error', p_error, 'view', null)
+$$;
+
+-- Validate a game's settings; returns the error code, or null if they are
+-- valid. p_variant is required for Matchen and ignored for Fill in the Blanks;
+-- p_pair_count is pairs or sentences.
+create or replace function private.game_config_error(
+	p_mode text,
+	p_variant text,
+	p_pair_count integer,
+	p_group_count integer
+)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+	select case
+		when p_mode is null or p_mode not in ('matchen', 'fill_blanks') then 'invalid_mode'
+		when p_mode = 'matchen' and (p_variant is null
+			or p_variant not in ('image_pairs', 'word_image', 'de_het', 'opposites')) then 'invalid_variant'
+		when p_pair_count is null or p_pair_count not in (6, 8, 12) then 'invalid_pair_count'
+		when p_group_count is null or p_group_count < 1 or p_group_count > private.max_groups() then 'invalid_group_count'
+	end
 $$;
 
 -- Realtime authorisation helper: host or active player of the session named
@@ -1172,6 +1269,7 @@ as $$
 declare
 	v_uid uuid := auth.uid();
 	v_name text := btrim(coalesce(p_name, ''));
+	v_error text := private.game_config_error(p_mode, p_variant, p_pair_count, p_group_count);
 	v_variant public.game_variant;
 	v_id uuid;
 	v_code text;
@@ -1186,20 +1284,11 @@ begin
 	if char_length(v_name) < 1 or char_length(v_name) > 60 then
 		return private.fail('invalid_session_name');
 	end if;
-	if p_mode is null or p_mode not in ('matchen', 'fill_blanks') then
-		return private.fail('invalid_mode');
+	if v_error is not null then
+		return private.fail(v_error);
 	end if;
 	if p_mode = 'matchen' then
-		if p_variant is null or p_variant not in ('image_pairs', 'word_image', 'de_het', 'opposites') then
-			return private.fail('invalid_variant');
-		end if;
 		v_variant := p_variant::public.game_variant;
-	end if;
-	if p_pair_count is null or p_pair_count not in (6, 8, 12) then
-		return private.fail('invalid_pair_count');
-	end if;
-	if p_group_count is null or p_group_count < 1 or p_group_count > private.max_groups() then
-		return private.fail('invalid_group_count');
 	end if;
 
 	insert into public.hosts (id) values (v_uid) on conflict (id) do nothing;
@@ -1407,7 +1496,7 @@ begin
 end;
 $$;
 
--- Host: start the game (spec 6.4, 8.1, 23). Initialisation is atomic: an
+-- Host: start the session's next game (spec 6.4, 8.1, 23). Initialisation is atomic: an
 -- unexpected failure raises and rolls back the whole transaction; business
 -- errors are returned before anything is written.
 create or replace function public.start_game(p_session_id uuid)
@@ -1504,9 +1593,17 @@ begin
 	from unnest(v_player_ids) with ordinality as o (player_id, ord)
 	where p.id = o.player_id;
 
-	insert into public.games (session_id, turn_order, active_player_id, current_round)
+	insert into public.games (
+		session_id, game_number, mode, variant, pair_count, group_count,
+		turn_order, active_player_id, current_round
+	)
 	values (
 		p_session_id,
+		coalesce((select max(g.game_number) from public.games g where g.session_id = p_session_id), 0) + 1,
+		v_session.mode,
+		v_session.variant,
+		v_session.pair_count,
+		v_session.group_count,
 		v_player_ids,
 		case when v_session.mode = 'matchen' then v_player_ids[1] end,
 		case when v_session.mode = 'fill_blanks' then 0 end
@@ -1606,7 +1703,7 @@ begin
 	if v_session.mode <> 'matchen' then
 		return private.respond(p_session_id, 'wrong_game_mode');
 	end if;
-	select * into v_game from public.games where session_id = p_session_id;
+	select * into v_game from public.games where session_id = p_session_id and status = 'active';
 
 	if p_revision <> v_session.revision then
 		return private.respond(p_session_id, 'stale_state');
@@ -1718,6 +1815,69 @@ begin
 end;
 $$;
 
+-- Host: set up the session's next game (any mode), keeping the players.
+--   * After a game has finished: every player's points move into their
+--     running session total (carried_score), scores and groups are reset and
+--     the session returns to the lobby with the new settings. The finished
+--     game keeps its result. New players can join until the host starts.
+--   * In the lobby: only the settings change.
+-- Not allowed while a game is in progress.
+create or replace function public.configure_game(
+	p_session_id uuid,
+	p_mode text,
+	p_variant text,
+	p_pair_count integer,
+	p_group_count integer
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+	v_uid uuid := auth.uid();
+	v_session public.game_sessions%rowtype;
+	v_error text := private.game_config_error(p_mode, p_variant, p_pair_count, p_group_count);
+begin
+	if v_uid is null then
+		return private.fail('not_authenticated');
+	end if;
+
+	select * into v_session from public.game_sessions where id = p_session_id for update;
+	if not found then
+		return private.fail('session_not_found');
+	end if;
+	if v_session.host_id <> v_uid then
+		return private.fail('not_host');
+	end if;
+	if v_session.status = 'in_progress' then
+		return private.respond(p_session_id, 'game_in_progress');
+	end if;
+	if v_error is not null then
+		return private.respond(p_session_id, v_error);
+	end if;
+
+	if v_session.status = 'completed' then
+		update public.players
+		set carried_score = carried_score + score, score = 0, group_number = null
+		where session_id = p_session_id;
+	end if;
+
+	update public.game_sessions
+	set mode = p_mode::public.game_mode,
+		variant = case when p_mode = 'matchen' then p_variant::public.game_variant end,
+		pair_count = p_pair_count,
+		group_count = p_group_count,
+		status = 'lobby',
+		started_at = null,
+		ended_at = null
+	where id = p_session_id;
+
+	perform private.bump_revision(p_session_id);
+	return private.respond(p_session_id);
+end;
+$$;
+
 -- Player: answer the current Fill in the Blanks round (spec 23.4). One answer
 -- per player per round, final once submitted. Beginner and Elementary players
 -- must pick one of the round's options; the others type the answer.
@@ -1766,7 +1926,7 @@ begin
 	if v_session.mode <> 'fill_blanks' then
 		return private.respond(p_session_id, 'wrong_game_mode');
 	end if;
-	select * into v_game from public.games where session_id = p_session_id;
+	select * into v_game from public.games where session_id = p_session_id and status = 'active';
 
 	if p_round <> v_game.current_round or v_game.reveal_until is not null then
 		return private.respond(p_session_id, 'round_closed');
@@ -1841,7 +2001,7 @@ begin
 	end if;
 
 	perform private.resolve_overdue(p_session_id);
-	select * into v_game from public.games where session_id = p_session_id;
+	select * into v_game from public.games where session_id = p_session_id order by game_number desc limit 1;
 	if v_game.status <> 'active' then
 		return private.respond(p_session_id);
 	end if;
@@ -1916,7 +2076,7 @@ begin
 	update public.players set status = 'removed', removed_at = now() where id = p_player_id;
 
 	if v_session.status = 'in_progress' then
-		select * into v_game from public.games where session_id = p_session_id for update;
+		select * into v_game from public.games where session_id = p_session_id order by game_number desc limit 1 for update;
 
 		if v_session.mode = 'matchen' and v_game.status = 'active' and v_game.active_player_id = p_player_id then
 			if v_game.first_flip is not null then
@@ -2008,6 +2168,7 @@ revoke execute on function public.flip_card(uuid, integer, uuid, bigint) from pu
 revoke execute on function public.submit_answer(uuid, integer, text) from public, anon;
 revoke execute on function public.skip_turn(uuid) from public, anon;
 revoke execute on function public.end_game(uuid) from public, anon;
+revoke execute on function public.configure_game(uuid, text, text, integer, integer) from public, anon;
 revoke execute on function public.remove_player(uuid, uuid) from public, anon;
 revoke execute on function public.delete_session(uuid) from public, anon;
 
@@ -2020,6 +2181,7 @@ grant execute on function public.flip_card(uuid, integer, uuid, bigint) to authe
 grant execute on function public.submit_answer(uuid, integer, text) to authenticated;
 grant execute on function public.skip_turn(uuid) to authenticated;
 grant execute on function public.end_game(uuid) to authenticated;
+grant execute on function public.configure_game(uuid, text, text, integer, integer) to authenticated;
 grant execute on function public.remove_player(uuid, uuid) to authenticated;
 grant execute on function public.delete_session(uuid) to authenticated;
 

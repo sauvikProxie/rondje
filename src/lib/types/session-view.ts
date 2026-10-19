@@ -18,7 +18,10 @@ export interface SessionView {
 	me: string | null;
 	session: ViewSession;
 	players: ViewPlayer[];
+	/** The current game: null in the lobby, else the active or just-finished game. */
 	game: ViewGame | null;
+	/** The session's finished games, oldest first. */
+	history: ViewHistoryGame[];
 }
 
 export interface ViewSession {
@@ -26,6 +29,7 @@ export interface ViewSession {
 	name: string;
 	join_code: string;
 	scheduled_at: string | null;
+	/** Settings of the current (or next) game. */
 	mode: GameMode;
 	/** Matchen only; null for Fill in the Blanks. */
 	variant: Variant | null;
@@ -33,6 +37,7 @@ export interface ViewSession {
 	pair_count: PairCount;
 	/** 1 = no groups. */
 	group_count: number;
+	/** State of the current game; back to 'lobby' while the next game is set up. */
 	status: 'lobby' | 'in_progress' | 'completed';
 	created_at: string;
 	started_at: string | null;
@@ -45,10 +50,27 @@ export interface ViewPlayer {
 	avatar: string;
 	level: ProficiencyLevel;
 	status: 'active' | 'removed';
+	/** Points in the current game. */
 	score: number;
-	/** Group number (1-based) once the game has started, when the session uses groups. */
+	/** Running session total: points from earlier games plus `score`. */
+	total_score: number;
+	/** Group number (1-based) once the game has started, when the game uses groups. */
 	group: number | null;
 	joined_at: string;
+}
+
+/** A finished game of the session (results only). */
+export interface ViewHistoryGame {
+	/** 1-based. */
+	number: number;
+	mode: GameMode;
+	variant: Variant | null;
+	pair_count: PairCount;
+	group_count: number;
+	end_reason: EndReason;
+	winner_ids: string[];
+	winning_groups: number[];
+	ended_at: string;
 }
 
 export interface ViewAttempt {
@@ -60,6 +82,8 @@ export interface ViewAttempt {
 }
 
 export interface ViewGame {
+	/** 1 for the session's first game, then 2, 3, ... */
+	number: number;
 	status: 'active' | 'completed';
 	turn_order: string[];
 	/** Matchen: whose turn it is. Always null in Fill in the Blanks. */
@@ -110,7 +134,7 @@ export interface ViewRound {
 	results: Record<string, boolean> | null;
 }
 
-/** Result shape of the action RPCs (flip, answer, skip, start, end, remove, view). */
+/** Result shape of the action RPCs (flip, answer, skip, start, end, configure, remove, view). */
 export interface ActionResult {
 	ok: boolean;
 	error: ErrorCode | null;

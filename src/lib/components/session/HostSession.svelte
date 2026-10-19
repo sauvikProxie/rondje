@@ -5,8 +5,10 @@
 	import BlanksTable from '$lib/components/game/BlanksTable.svelte';
 	import GameTable from '$lib/components/game/GameTable.svelte';
 	import ResultsView from '$lib/components/game/ResultsView.svelte';
+	import SessionStandings from '$lib/components/game/SessionStandings.svelte';
 	import ParticipantList from '$lib/components/lobby/ParticipantList.svelte';
 	import InvitePanel from '$lib/components/session/InvitePanel.svelte';
+	import NextGamePanel from '$lib/components/session/NextGamePanel.svelte';
 	import Alert from '$lib/components/shared/Alert.svelte';
 	import ConfirmButton from '$lib/components/shared/ConfirmButton.svelte';
 	import ConnectionPill from '$lib/components/shared/ConnectionPill.svelte';
@@ -31,7 +33,13 @@
 	const activePlayers = $derived(view.players.filter((p) => p.status === 'active'));
 	const minPlayers = $derived(Math.max(2, session.group_count));
 	const canStart = $derived(status === 'lobby' && activePlayers.length >= minPlayers);
+	/** The game being set up or played (1, 2, ...). */
+	const gameNumber = $derived(view.game?.number ?? view.history.length + 1);
 	let removing = $state<string | null>(null);
+	/** After a game: choosing the settings of the next one. */
+	let settingUpNext = $state(false);
+	/** In the lobby: changing the settings before the start. */
+	let changingGame = $state(false);
 
 	// The host moves a stalled game on (there is no turn timer).
 	const skip = $derived.by(() => {
@@ -76,11 +84,12 @@
 			<h1 class="text-3xl font-black break-words sm:text-4xl">{view.session.name}</h1>
 			<div class="mt-2 flex flex-wrap items-center gap-2">
 				<StatusBadge {status} />
+				{#if gameNumber > 1}<span class="pill bg-teal-soft text-teal-deep">Game {gameNumber}</span>{/if}
 				<GameBadge mode={session.mode} variant={session.variant} pairCount={session.pair_count} groupCount={session.group_count} />
 				{#if view.session.scheduled_at}
 					<span class="pill bg-surface ring-2 ring-ink/10">📅 {formatDateTime(view.session.scheduled_at)}</span>
 				{/if}
-				{#if status !== 'completed'}<ConnectionPill state={sync.connection} />{/if}
+				<ConnectionPill state={sync.connection} />
 			</div>
 		</div>
 		<div class="flex flex-wrap gap-2">
@@ -107,8 +116,25 @@
 		<div class="mt-6 grid gap-5 lg:grid-cols-2">
 			<div class="space-y-5">
 				<InvitePanel joinCode={view.session.join_code} {inviteUrl} {qrSvg} accepting />
+				{#if changingGame}
+					<NextGamePanel
+						{sync}
+						title="Change the game"
+						hint="Players in the lobby see the new game straight away."
+						submitLabel="Save changes"
+						oncancel={() => (changingGame = false)}
+						ondone={() => (changingGame = false)}
+					/>
+				{:else}
 				<section class="card-surface p-5 sm:p-6" aria-labelledby="config-heading">
-					<h2 id="config-heading" class="text-xl font-extrabold">Game configuration</h2>
+					<div class="flex flex-wrap items-center justify-between gap-2">
+						<h2 id="config-heading" class="text-xl font-extrabold">
+							{gameNumber > 1 ? `Game ${gameNumber} configuration` : 'Game configuration'}
+						</h2>
+						<button type="button" class="btn-ghost min-h-11 px-4 text-sm" disabled={sync.busy} onclick={() => (changingGame = true)}>
+							<span aria-hidden="true">✎</span> Change game
+						</button>
+					</div>
 					<dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
 						<div><dt class="text-ink-soft">Game</dt><dd class="font-bold">{MODE_INFO[session.mode].label}</dd></div>
 						{#if session.mode === 'matchen' && session.variant}
@@ -124,6 +150,8 @@
 						{#if session.mode === 'fill_blanks'}Beginner and Elementary players pick from four options; Intermediate and Advanced players type the answer.{/if}
 					</p>
 				</section>
+				{/if}
+				{#if view.history.length > 0}<SessionStandings {view} />{/if}
 			</div>
 
 			<section class="card-surface flex flex-col p-5 sm:p-6" aria-labelledby="participants-heading">
@@ -135,8 +163,8 @@
 					<ParticipantList players={view.players} online={sync.online} onremove={remove} {removing} />
 				</div>
 				<div class="mt-5 border-t-2 border-ink/5 pt-5">
-					<button class="btn-primary w-full text-lg" disabled={!canStart || sync.busy} onclick={() => sync.act('start')}>
-						{sync.busy ? 'Starting…' : '▶ Start game'}
+					<button class="btn-primary w-full text-lg" disabled={!canStart || changingGame || sync.busy} onclick={() => sync.act('start')}>
+						{sync.busy ? 'Starting…' : gameNumber > 1 ? `▶ Start game ${gameNumber}` : '▶ Start game'}
 					</button>
 					<p class="mt-2 text-center text-sm text-ink-soft">
 						{#if activePlayers.length < minPlayers}
@@ -174,10 +202,29 @@
 				<ParticipantList players={view.players} online={sync.online} onremove={remove} {removing} showRemoved />
 			</div>
 		</details>
+	{:else if settingUpNext}
+		<div class="mx-auto mt-6 max-w-3xl">
+			<NextGamePanel
+				{sync}
+				title="Set up the next game"
+				hint="Everyone goes back to the lobby and keeps their points in the session total. New players can join until you start."
+				submitLabel="Back to the lobby →"
+				oncancel={() => (settingUpNext = false)}
+				ondone={() => (settingUpNext = false)}
+			/>
+		</div>
 	{:else}
-		<div class="mt-6">
+		<div class="mt-6 space-y-6">
 			<ResultsView {view} />
-			<p class="mt-6 text-center"><a href="/dashboard" class="btn-ghost">Back to sessions</a></p>
+			<div class="flex flex-col items-center justify-center gap-3 sm:flex-row">
+				<button type="button" class="btn-primary" disabled={sync.busy} onclick={() => (settingUpNext = true)}>
+					<span aria-hidden="true">▶</span> Play another game
+				</button>
+				<a href="/dashboard" class="btn-ghost">Back to sessions</a>
+			</div>
+			{#if view.history.length > 1}
+				<div class="mx-auto max-w-2xl"><SessionStandings {view} /></div>
+			{/if}
 		</div>
 	{/if}
 </div>

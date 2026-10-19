@@ -100,6 +100,21 @@ export const rpc = {
 	endGame: (supabase: Client, sessionId: string) =>
 		call<ActionResult>('end_game', supabase.rpc('end_game', { p_session_id: sessionId })),
 
+	configureGame: (
+		supabase: Client,
+		args: { sessionId: string; mode: string; variant: string | null; pairCount: number; groupCount: number }
+	) =>
+		call<ActionResult>(
+			'configure_game',
+			supabase.rpc('configure_game', {
+				p_session_id: args.sessionId,
+				p_mode: args.mode,
+				p_variant: args.variant,
+				p_pair_count: args.pairCount,
+				p_group_count: args.groupCount
+			})
+		),
+
 	deleteSession: (supabase: Client, sessionId: string) =>
 		call<ActionResult>('delete_session', supabase.rpc('delete_session', { p_session_id: sessionId })),
 

@@ -10,6 +10,10 @@ emoji avatar and level, then play one of two games, alone or in groups:
   once. Beginner/Elementary players choose from four options;
   Intermediate/Advanced players type the answer.
 
+After a game the host can play another one in the same session, with any game
+and settings. Players stay in, newcomers can join in between, and a running
+session total adds up everyone's points.
+
 The product and technical specification is [`docs/rondje-spec.md`](docs/rondje-spec.md);
 the rebuild log is [`docs/PROGRESS.md`](docs/PROGRESS.md).
 
@@ -28,7 +32,7 @@ for database and security tests.
 - **The database is authoritative.** Every state change goes through a
   `SECURITY DEFINER` PostgreSQL function in `supabase/schema.sql`
   (`create_session`, `join_session`, `start_game`, `flip_card`,
-  `submit_answer`, `skip_turn`, `end_game`, `remove_player`,
+  `submit_answer`, `skip_turn`, `end_game`, `configure_game`, `remove_player`,
   `delete_session`, `get_session_view`). Each one identifies the caller with
   `auth.uid()` from their JWT, locks the session row, validates the request and
   applies the transition atomically. Business errors are returned as
@@ -52,6 +56,12 @@ for database and security tests.
   skip a stalled turn or close a round.
 - **Groups** (optional, 2–4) are dealt at game start; each group has its own
   scorecard and groups are ranked by points per member.
+- **Several games per session.** `games` holds one row per game
+  (`game_number` 1, 2, …, with its own settings); at most one is active.
+  `configure_game` moves each player's `score` into `carried_score` and
+  returns a finished session to the lobby with the next game's settings (in the
+  lobby it only changes them). The view's `total_score` is
+  `carried_score + score`, and `history` lists the finished games.
 - **The pure game engine** in `src/lib/game/` mirrors the SQL rules for unit
   tests. The UI reuses it to disable cards that can't be flipped and to compute
   rankings.
@@ -71,6 +81,7 @@ for database and security tests.
 | `/api/sessions/[id]/flip` | Matchen: `POST {position, actionId, revision}` |
 | `/api/sessions/[id]/answer` | Fill in the Blanks: `POST {round, answer}` |
 | `/api/sessions/[id]/start`, `/end`, `/skip`, `/delete` | Host actions (`/skip` passes a stalled turn on or closes the current round; `/delete` permanently removes the session and all its data) |
+| `/api/sessions/[id]/configure` | Host: `POST {mode, variant, pairCount, groupCount}` sets up the next game (after a finished game, back to the lobby) |
 | `/api/sessions/[id]/players/[playerId]/remove` | Host removes a participant |
 
 ## Prerequisites
@@ -178,12 +189,14 @@ npm run test:e2e     # Playwright: responsive checks + multiplayer journey
   desktop. App pages come from the production build. The lobby, game and results
   screens are rendered by a test-only harness (`tests/visual`, its own Vite
   server on port 4174) with fixture views. No Supabase is required.
-- **`tests/e2e/multiplayer.spec.ts`** has two journeys. Matchen (spec 19.3):
+- **`tests/e2e/multiplayer.spec.ts`** has three journeys. Matchen (spec 19.3):
   host sign-in, session creation, three players in separate browser contexts,
   a match, a miss after which the matched pair stays face up for everyone, the
   board cleared, synchronised results, and refresh. Fill in the Blanks with two
   groups: a choosing and a typing player, the reveal, the host closing a round,
-  and group results. It needs
+  and group results. Several games: a Matchen game, then the host sets up Fill
+  in the Blanks, a newcomer joins in between, and the session totals add up.
+  It needs
   `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` and
   `SUPABASE_SECRET_KEY` for a project with the schema and seed applied and
   anonymous sign-ins enabled; it is skipped otherwise. It creates a confirmed

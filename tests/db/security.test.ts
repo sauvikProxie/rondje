@@ -93,6 +93,10 @@ describe('direct table access', () => {
 			['get_session_view', { p_session_id: g.sessionId }],
 			['start_game', { p_session_id: g.sessionId }],
 			['end_game', { p_session_id: g.sessionId }],
+			[
+				'configure_game',
+				{ p_session_id: g.sessionId, p_mode: 'matchen', p_variant: 'word_image', p_pair_count: 6, p_group_count: 1 }
+			],
 			['skip_turn', { p_session_id: g.sessionId }],
 			['submit_answer', { p_session_id: g.sessionId, p_round: 0, p_answer: 'x' }],
 			['flip_card', { p_session_id: g.sessionId, p_position: 0, p_action_id: crypto.randomUUID(), p_revision: 1 }],

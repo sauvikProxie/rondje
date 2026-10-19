@@ -99,6 +99,7 @@ export type Database = {
 					level: Database['public']['Enums']['proficiency_level'];
 					status: Database['public']['Enums']['player_status'];
 					score: number;
+					carried_score: number;
 					group_number: number | null;
 					joined_at: string;
 					removed_at: string | null;
@@ -112,6 +113,7 @@ export type Database = {
 					level: Database['public']['Enums']['proficiency_level'];
 					status?: Database['public']['Enums']['player_status'];
 					score?: number;
+					carried_score?: number;
 					group_number?: number | null;
 					joined_at?: string;
 					removed_at?: string | null;
@@ -125,6 +127,7 @@ export type Database = {
 					level?: Database['public']['Enums']['proficiency_level'];
 					status?: Database['public']['Enums']['player_status'];
 					score?: number;
+					carried_score?: number;
 					group_number?: number | null;
 					joined_at?: string;
 					removed_at?: string | null;
@@ -230,6 +233,11 @@ export type Database = {
 				Row: {
 					id: string;
 					session_id: string;
+					game_number: number;
+					mode: Database['public']['Enums']['game_mode'];
+					variant: Database['public']['Enums']['game_variant'] | null;
+					pair_count: number;
+					group_count: number;
 					status: Database['public']['Enums']['game_status'];
 					turn_order: string[];
 					active_player_id: string | null;
@@ -246,6 +254,11 @@ export type Database = {
 				Insert: {
 					id?: string;
 					session_id: string;
+					game_number?: number;
+					mode: Database['public']['Enums']['game_mode'];
+					variant?: Database['public']['Enums']['game_variant'] | null;
+					pair_count: number;
+					group_count: number;
 					status?: Database['public']['Enums']['game_status'];
 					turn_order: string[];
 					active_player_id?: string | null;
@@ -262,6 +275,11 @@ export type Database = {
 				Update: {
 					id?: string;
 					session_id?: string;
+					game_number?: number;
+					mode?: Database['public']['Enums']['game_mode'];
+					variant?: Database['public']['Enums']['game_variant'] | null;
+					pair_count?: number;
+					group_count?: number;
 					status?: Database['public']['Enums']['game_status'];
 					turn_order?: string[];
 					active_player_id?: string | null;
@@ -279,7 +297,7 @@ export type Database = {
 					{
 						foreignKeyName: 'games_session_id_fkey';
 						columns: ['session_id'];
-						isOneToOne: true;
+						isOneToOne: false;
 						referencedRelation: 'game_sessions';
 						referencedColumns: ['id'];
 					}
@@ -515,6 +533,16 @@ export type Database = {
 			};
 			end_game: {
 				Args: { p_session_id: string };
+				Returns: Json;
+			};
+			configure_game: {
+				Args: {
+					p_session_id: string;
+					p_mode: string;
+					p_variant: string | null;
+					p_pair_count: number;
+					p_group_count: number;
+				};
 				Returns: Json;
 			};
 			delete_session: {

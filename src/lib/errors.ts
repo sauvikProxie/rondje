@@ -16,10 +16,11 @@ export const ERROR_MESSAGES = {
 	// Session lookup and lifecycle
 	invalid_join_code: 'Join codes have 6 letters and numbers. Please check the code and try again.',
 	session_not_found: "We couldn't find a session with that code.",
-	session_completed: 'This session has already finished.',
+	session_completed: 'This game has already finished.',
 	session_in_progress: 'This game has already started, so new players can no longer join.',
 	session_not_in_lobby: 'This game has already started.',
 	game_not_active: 'The game is not running.',
+	game_in_progress: 'Finish or end the current game before setting up the next one.',
 
 	// Onboarding
 	invalid_nickname: 'Choose a nickname between 1 and 20 characters.',

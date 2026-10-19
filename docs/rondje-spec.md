@@ -1490,9 +1490,10 @@ specification leaves open. They clarify; they do not change any rule above.
 # 23. Changes requested after the rebuild (2026-10-19)
 
 These changes were requested by the product owner after the rebuild. Where
-they conflict with earlier sections (notably 2.2 "Team-based gameplay" and
-"Other games unrelated to Matchen", 7.1 "every player has their own board",
-9.5 and 9.6 "turn time limit"), this section wins.
+they conflict with earlier sections (notably 2.1 "One game per session", 2.2
+"Multiple games within one session", "Team-based gameplay" and "Other games
+unrelated to Matchen", 7.1 "every player has their own board", 9.5 and 9.6
+"turn time limit"), this section wins.
 
 ## 23.1 No turn timer
 
@@ -1548,3 +1549,28 @@ variant and chooses 6, 8 or 12 sentences.
   before the round closes; typing players never receive the options.
 - Content lives in `grammar_questions` (topics: verbs, articles,
   prepositions, pronouns, adjectives, plurals, past tense, word order).
+
+## 23.5 Several games per session (2026-10-20)
+
+After a game has finished the host can play another game in the same
+session, without creating a new session.
+
+- On the results screen the host chooses **Play another game** and picks any
+  game and settings (Matchen variant or Fill in the Blanks, size, groups),
+  pre-filled with the last game's. Everyone returns to the lobby; the join
+  code and link stay the same, and new players can join until the host
+  starts. In the lobby the host can also change the game before starting.
+  Setting up a game is not possible while one is in progress.
+- Games are numbered (Game 1, 2, …) and each keeps its own settings and
+  result. Groups are dealt again for every game.
+- Points carry over: each player has a **running session total** (all games
+  so far). Each game's results still show that game's points and winner; the
+  **session standings** (ranked by total) and the list of games played with
+  their winners appear on the results screen from the second game on, and in
+  the lobby between games.
+- Removed players stay removed for later games. Their points stay in their
+  session total but do not count for any group in later games.
+- Storage: `games` has one row per game (`game_number`, `mode`, `variant`,
+  `pair_count`, `group_count`; at most one active per session).
+  `players.score` is the current game's points and `players.carried_score`
+  the earlier games'; `configure_game()` moves one into the other.

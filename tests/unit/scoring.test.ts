@@ -148,6 +148,24 @@ describe('scoring and completion', () => {
 		expect(ranked.filter((r) => r.rank === 1).map((r) => r.player.id)).toEqual(['a', 'b']);
 		expect(ranked.every((r) => r.isWinner === (r.rank === 1))).toBe(true);
 	});
+
+	test('session standings rank by the running total, not by the last game', () => {
+		const players = [
+			{ id: 'a', score: 4, total_score: 4, status: 'active' as const },
+			{ id: 'b', score: 1, total_score: 7, status: 'active' as const },
+			{ id: 'c', score: 0, total_score: 4, status: 'active' as const },
+			{ id: 'd', score: 0, total_score: 9, status: 'removed' as const }
+		];
+		const ranked = rankPlayers(players, [], (p) => p.total_score);
+		expect(ranked.map((r) => [r.player.id, r.rank])).toEqual([
+			['b', 1],
+			['a', 2],
+			['c', 2],
+			['d', null]
+		]);
+		// The players themselves are returned unchanged.
+		expect(ranked[0]!.player).toBe(players[1]);
+	});
 });
 
 describe('groups', () => {

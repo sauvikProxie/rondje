@@ -46,7 +46,9 @@
 <section class="mx-auto max-w-2xl" aria-labelledby="results-heading">
 	<div class="card-surface overflow-hidden">
 		<div class="bg-teal-deep px-5 py-7 text-center text-white sm:px-8">
-			<p class="text-sm font-bold tracking-wide text-white/85 uppercase">{session.name} · {gameLabel}</p>
+			<p class="text-sm font-bold tracking-wide text-white/85 uppercase">
+				{session.name} · {game && game.number > 1 ? `Game ${game.number} · ` : ''}{gameLabel}
+			</p>
 			<h1 id="results-heading" class="mt-2 text-3xl font-black sm:text-4xl">{heading}</h1>
 			{#if game?.end_reason}
 				<p class="mt-2 text-white/90">{END_REASON_LABELS[game.end_reason]}</p>

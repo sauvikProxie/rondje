@@ -176,16 +176,19 @@ export class TestDb {
 		return { user, playerId: res.player_id as string };
 	}
 
+	/** Board layout of the session's latest game. */
 	async layout(sessionId: string): Promise<{ position: number; pair_id: string }[]> {
-		return this.sql(
-			`select l.position, l.pair_id from public.game_layout l
-			 join public.games g on g.id = l.game_id where g.session_id = $1 order by l.position`,
-			[sessionId]
-		);
+		const game = await this.game(sessionId);
+		if (!game) return [];
+		return this.sql(`select position, pair_id from public.game_layout where game_id = $1 order by position`, [game.id]);
 	}
 
+	/** The session's latest game (a session can play several games). */
 	async game(sessionId: string) {
-		const rows = await this.sql<any>(`select * from public.games where session_id = $1`, [sessionId]);
+		const rows = await this.sql<any>(
+			`select * from public.games where session_id = $1 order by game_number desc limit 1`,
+			[sessionId]
+		);
 		return rows[0];
 	}
 
@@ -233,7 +236,7 @@ export class TestDb {
 			 from public.games g
 			 join public.game_rounds r on r.game_id = g.id and r.round = g.current_round
 			 join public.grammar_questions q on q.id = r.question_id
-			 where g.session_id = $1`,
+			 where g.session_id = $1 and g.status = 'active'`,
 			[sessionId]
 		);
 		return rows[0];
@@ -244,7 +247,7 @@ export class TestDb {
 		await this.sql(
 			`update public.games set
 				reveal_until = case when reveal_until is null then null else now() - interval '1 second' end
-			 where session_id = $1`,
+			 where session_id = $1 and status = 'active'`,
 			[sessionId]
 		);
 	}

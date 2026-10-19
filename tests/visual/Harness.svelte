@@ -3,6 +3,7 @@
 	import BlanksTable from '$lib/components/game/BlanksTable.svelte';
 	import GameTable from '$lib/components/game/GameTable.svelte';
 	import ResultsView from '$lib/components/game/ResultsView.svelte';
+	import SessionStandings from '$lib/components/game/SessionStandings.svelte';
 	import LobbyView from '$lib/components/lobby/LobbyView.svelte';
 	import ConnectionPill from '$lib/components/shared/ConnectionPill.svelte';
 	import Logo from '$lib/components/shared/Logo.svelte';
@@ -48,7 +49,15 @@
 		{:else if view.session.status === 'in_progress'}
 			<GameTable {sync} />
 		{:else}
-			<ResultsView {view} />
+			<div class="space-y-6">
+				<ResultsView {view} />
+				<p class="mx-auto max-w-2xl rounded-2xl bg-teal-soft px-4 py-3 text-center font-bold text-teal-deep" role="status">
+					Stay on this page: if the host starts another game, you'll join it automatically.
+				</p>
+				{#if view.history.length > 1}
+					<div class="mx-auto max-w-2xl"><SessionStandings {view} /></div>
+				{/if}
+			</div>
 		{/if}
 	</main>
 </div>

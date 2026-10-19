@@ -57,7 +57,7 @@ async function joinAs(browser: Browser, joinCode: string, nickname: string, avat
 	await page.locator('label', { hasText: new RegExp(`^${level}$`) }).click();
 	await page.getByRole('button', { name: /^Join as/ }).click();
 	await expect(page).toHaveURL(new RegExp(`/session/${joinCode}$`), { timeout: UI_TIMEOUT });
-	await expect(page.getByText('Waiting for the host to start the game')).toBeVisible();
+	await expect(page.getByText(/Waiting for the host to start/)).toBeVisible();
 	return page;
 }
 
@@ -231,6 +231,86 @@ test('Fill in the Blanks with groups: choose, type, reveal and group scorecards'
 		await expect(typer.getByRole('heading', { name: `Group ${chooserGroup} wins!` })).toBeVisible({ timeout: UI_TIMEOUT });
 		await expect(host.getByRole('list', { name: 'Group rankings' })).toBeVisible();
 		await expect(host.getByRole('list', { name: 'Final rankings' })).toContainText('1 of 6 correct');
+	} finally {
+		await admin.cleanup();
+	}
+});
+
+test('Several games in one session: play again with another game and keep a running total', async ({ browser }) => {
+	const admin = new SupabaseAdmin(config!.url, config!.secretKey);
+	try {
+		// Game 1: Matchen, Word–Image, 6 pairs.
+		const host = await signInHost(browser, admin);
+		await host.goto('/dashboard/sessions/new');
+		await host.getByLabel('Session name').fill('E2E evening');
+		await host.getByText('Word–Image', { exact: true }).click();
+		await host.locator('label', { hasText: '12 cards' }).click();
+		const { joinCode, sessionId } = await createdSession(host, admin);
+
+		const players: Page[] = [];
+		for (const [i, nickname] of NICKNAMES.slice(0, 2).entries()) players.push(await joinAs(browser, joinCode, nickname, AVATARS[i]!));
+		admin.trackUsers((await admin.players(sessionId)).map((p) => p.user_id));
+		await expect(host.getByText('2 joined')).toBeVisible({ timeout: UI_TIMEOUT });
+		await host.getByRole('button', { name: /Start game/ }).click();
+
+		// The first player finds one pair, then the host ends the game.
+		const game1 = await admin.game(sessionId);
+		expect(game1.game_number).toBe(1);
+		const dbPlayers = await admin.players(sessionId);
+		const nicknameOf = (playerId: string) => dbPlayers.find((p) => p.id === playerId)!.nickname;
+		const scorer = nicknameOf(game1.turn_order[0]!);
+		const scorerPage = players[NICKNAMES.indexOf(scorer)]!;
+		const pairs = pairPositions(await admin.layout(game1.id));
+		await expect(scorerPage.getByText('Your turn!')).toBeVisible({ timeout: UI_TIMEOUT });
+		await flip(scorerPage, pairs[0]![0]);
+		await flip(scorerPage, pairs[0]![1]);
+		await expect(scoreEntry(host, scorer, 1)).toBeVisible({ timeout: UI_TIMEOUT });
+		await host.getByRole('button', { name: /End game/ }).click();
+		await host.getByRole('button', { name: /Confirm: end game now/ }).click();
+		await expect(scorerPage.getByRole('heading', { name: 'You won! 🎉' })).toBeVisible({ timeout: UI_TIMEOUT });
+		for (const page of players) await expect(page.getByText(/if the host starts another game/)).toBeVisible();
+
+		// The host sets up a different game; everyone is back in the lobby.
+		await host.getByRole('button', { name: /Play another game/ }).click();
+		await expect(host.getByRole('heading', { name: 'Set up the next game' })).toBeVisible();
+		await host.getByText('Fill in the Blanks', { exact: true }).click();
+		await host.locator('label', { hasText: /^6s*sentences$/ }).click();
+		await host.getByRole('button', { name: /Back to the lobby/ }).click();
+		await expect(host.getByRole('heading', { name: 'Game 2 configuration' })).toBeVisible({ timeout: UI_TIMEOUT });
+		for (const page of players) {
+			await expect(page.getByText('Waiting for the host to start game 2')).toBeVisible({ timeout: UI_TIMEOUT });
+			await expect(page.getByRole('list', { name: 'Session standings' })).toContainText(scorer);
+		}
+
+		// A new player can join between games.
+		const late = await joinAs(browser, joinCode, NICKNAMES[2]!, AVATARS[2]!);
+		admin.trackUsers((await admin.players(sessionId)).map((p) => p.user_id));
+		await expect(host.getByText('3 joined')).toBeVisible({ timeout: UI_TIMEOUT });
+
+		// Game 2: everyone answers the first sentence correctly, then the host ends it.
+		await host.getByRole('button', { name: /Start game 2/ }).click();
+		const all = [...players, late];
+		for (const page of all) await expect(page.getByText('Sentence 1 of 6')).toBeVisible({ timeout: UI_TIMEOUT });
+		const game2 = await admin.game(sessionId);
+		expect(game2.game_number).toBe(2);
+		const answer = await admin.roundAnswer(game2.id, 0);
+		for (const page of all) {
+			await page.getByRole('group', { name: 'Answer options' }).getByRole('button', { name: answer, exact: true }).click();
+		}
+		for (const page of all) await expect(page.getByText('Correct! +1 point.')).toBeVisible({ timeout: UI_TIMEOUT });
+		await host.getByRole('button', { name: /End game/ }).click();
+		await host.getByRole('button', { name: /Confirm: end game now/ }).click();
+
+		// Results of game 2, plus the session standings over both games.
+		for (const page of [host, ...all]) {
+			await expect(page.getByText(/Game 2 · Fill in the Blanks/i)).toBeVisible({ timeout: UI_TIMEOUT });
+			const standings = page.getByRole('list', { name: 'Session standings' });
+			await expect(standings.locator('li').first()).toContainText(scorer);
+			await expect(standings.locator('li').first()).toContainText('2');
+			await expect(page.getByRole('list', { name: 'Games played' }).locator('li')).toHaveCount(2);
+		}
+		const totals = Object.fromEntries((await admin.players(sessionId)).map((p) => [p.nickname, p.carried_score + p.score]));
+		expect(totals).toEqual({ [NICKNAMES[0]!]: scorer === NICKNAMES[0] ? 2 : 1, [NICKNAMES[1]!]: scorer === NICKNAMES[1] ? 2 : 1, [NICKNAMES[2]!]: 1 });
 	} finally {
 		await admin.cleanup();
 	}

@@ -37,15 +37,19 @@ export class SupabaseAdmin {
 		return data;
 	}
 
+	/** The session's latest game. */
 	async game(sessionId: string) {
 		const { data, error } = await this.client
 			.from('games')
-			.select('id, status, turn_order, active_player_id, current_round, end_reason, winner_ids, winning_groups')
+			.select('id, game_number, status, turn_order, active_player_id, current_round, end_reason, winner_ids, winning_groups')
 			.eq('session_id', sessionId)
+			.order('game_number', { ascending: false })
+			.limit(1)
 			.single();
 		if (error) throw error;
 		return data as {
 			id: string;
+			game_number: number;
 			status: string;
 			turn_order: string[];
 			active_player_id: string | null;
@@ -59,7 +63,7 @@ export class SupabaseAdmin {
 	async players(sessionId: string) {
 		const { data, error } = await this.client
 			.from('players')
-			.select('id, user_id, nickname, score, status, group_number')
+			.select('id, user_id, nickname, score, carried_score, status, group_number')
 			.eq('session_id', sessionId);
 		if (error) throw error;
 		return data as {
@@ -67,6 +71,7 @@ export class SupabaseAdmin {
 			user_id: string;
 			nickname: string;
 			score: number;
+			carried_score: number;
 			status: string;
 			group_number: number | null;
 		}[];

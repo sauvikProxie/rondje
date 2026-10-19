@@ -25,7 +25,7 @@
 	const errorTitles: Record<string, string> = {
 		invalid_join_code: 'That code does not look right',
 		session_not_found: 'Session not found',
-		session_completed: 'This session has finished',
+		session_completed: 'This game has finished',
 		session_in_progress: 'This game has already started',
 		removed: 'You were removed from this session',
 		service_unavailable: 'Joining is unavailable'
@@ -46,6 +46,8 @@
 					{errorMessage(data.state.code)}
 					{#if data.state.code === 'session_in_progress'}
 						If you already joined, open the game on the device you joined with.
+					{:else if data.state.code === 'session_completed'}
+						If the host sets up another game, you can join it with this link.
 					{/if}
 				</Alert>
 				<form method="POST" action="/?/join" class="mt-6">

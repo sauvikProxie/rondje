@@ -4,6 +4,7 @@
 	import BlanksTable from '$lib/components/game/BlanksTable.svelte';
 	import GameTable from '$lib/components/game/GameTable.svelte';
 	import ResultsView from '$lib/components/game/ResultsView.svelte';
+	import SessionStandings from '$lib/components/game/SessionStandings.svelte';
 	import LobbyView from '$lib/components/lobby/LobbyView.svelte';
 	import ConnectionPill from '$lib/components/shared/ConnectionPill.svelte';
 	import Logo from '$lib/components/shared/Logo.svelte';
@@ -42,7 +43,7 @@
 			<Logo size="sm" />
 			<div class="flex min-w-0 items-center gap-2">
 				<p class="hidden truncate text-sm font-bold text-ink-soft sm:block">{view.session.name}</p>
-				{#if status !== 'completed'}<ConnectionPill state={sync.connection} />{/if}
+				<ConnectionPill state={sync.connection} />
 			</div>
 		</header>
 
@@ -57,8 +58,16 @@
 					<GameTable {sync} />
 				{/if}
 			{:else}
-				<ResultsView {view} />
-				<p class="mt-6 text-center"><a href="/" class="btn-ghost">Back to the start page</a></p>
+				<div class="space-y-6">
+					<ResultsView {view} />
+					<p class="mx-auto max-w-2xl rounded-2xl bg-teal-soft px-4 py-3 text-center font-bold text-teal-deep" role="status">
+						Stay on this page: if the host starts another game, you'll join it automatically.
+					</p>
+					{#if view.history.length > 1}
+						<div class="mx-auto max-w-2xl"><SessionStandings {view} /></div>
+					{/if}
+					<p class="text-center"><a href="/" class="btn-ghost">Back to the start page</a></p>
+				</div>
 			{/if}
 		</main>
 	</div>

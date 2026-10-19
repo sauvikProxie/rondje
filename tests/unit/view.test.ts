@@ -4,6 +4,7 @@ import type { SessionView, ViewGame } from '../../src/lib/types/session-view';
 
 function game(overrides: Partial<ViewGame> = {}): ViewGame {
 	return {
+		number: 1,
 		status: 'active',
 		card_count: 12,
 		turn_order: ['a', 'b'],
@@ -45,7 +46,8 @@ function view(g: ViewGame, me: string | null = 'a'): SessionView {
 			ended_at: null
 		},
 		players: [],
-		game: g
+		game: g,
+		history: []
 	};
 }
 
