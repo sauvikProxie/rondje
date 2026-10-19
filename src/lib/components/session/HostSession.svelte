@@ -113,7 +113,7 @@
 	{#if sync.fatal}
 		<div class="mt-6"><Alert title="This session is unavailable">{sync.fatal.message}</Alert></div>
 	{:else if status === 'lobby'}
-		<div class="mt-6 grid gap-5 lg:grid-cols-2">
+		<div class="mt-6 grid animate-screen-in gap-5 lg:grid-cols-2">
 			<div class="space-y-5">
 				<InvitePanel joinCode={view.session.join_code} {inviteUrl} {qrSvg} accepting />
 				{#if changingGame}
@@ -214,7 +214,7 @@
 			/>
 		</div>
 	{:else}
-		<div class="mt-6 space-y-6">
+		<div class="mt-6 animate-screen-in space-y-6">
 			<ResultsView {view} />
 			<div class="flex flex-col items-center justify-center gap-3 sm:flex-row">
 				<button type="button" class="btn-primary" disabled={sync.busy} onclick={() => (settingUpNext = true)}>

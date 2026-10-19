@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ScoreValue from '$lib/components/motion/ScoreValue.svelte';
 	import PlayerAvatar from '$lib/components/shared/PlayerAvatar.svelte';
 	import { groupLabel } from '$lib/game/view';
 	import type { SessionView, ViewPlayer } from '$lib/types/session-view';
@@ -60,7 +61,7 @@
 	{@const removed = player.status === 'removed'}
 	{@const s = status(player)}
 	<li
-		class="relative flex items-center gap-2.5 rounded-2xl border-2 p-2 {isActive ? 'border-saffron bg-saffron-soft' : 'border-transparent bg-surface'}
+		class="relative flex items-center gap-2.5 rounded-2xl border-2 p-2 transition-colors duration-300 {isActive ? 'border-saffron bg-saffron-soft' : 'border-transparent bg-surface'}
 			{removed ? 'opacity-60' : ''} {compact ? 'min-w-[9.5rem] shrink-0 snap-start lg:min-w-0' : ''}"
 		data-nickname={player.nickname}
 		data-score={player.score}
@@ -71,17 +72,19 @@
 				<span class="truncate text-sm font-extrabold">{player.nickname}</span>
 				{#if player.id === me}<span class="text-xs font-bold text-teal-deep">(you)</span>{/if}
 			</span>
-			<span
-				class="block text-xs {s.tone === 'good'
-					? 'font-bold text-teal-deep'
-					: s.tone === 'bad'
-						? 'font-bold text-coral-deep'
-						: s.tone === 'active'
-							? 'font-bold text-ink'
-							: 'text-ink-soft'}">{s.text}</span
-			>
+			{#key s.text}
+				<span
+					class="block animate-fade-in text-xs {s.tone === 'good'
+						? 'font-bold text-teal-deep'
+						: s.tone === 'bad'
+							? 'font-bold text-coral-deep'
+							: s.tone === 'active'
+								? 'font-bold text-ink'
+								: 'text-ink-soft'}">{s.text}</span
+				>
+			{/key}
 		</span>
-		<span class="text-xl font-black tabular-nums" aria-hidden="true">{player.score}</span>
+		<ScoreValue value={player.score} class="text-xl font-black" />
 		<span class="sr-only">{points(player.score)}</span>
 	</li>
 {/snippet}
@@ -99,7 +102,7 @@
 				>
 					<p class="flex items-baseline justify-between gap-1 px-1">
 						<span class="truncate text-sm font-black">{groupLabel(group)}{#if group === myGroup}<span class="sr-only">{' (your group)'}</span>{/if}</span>
-						<span class="text-lg font-black tabular-nums">{total}<span class="sr-only">{` ${total === 1 ? 'point' : 'points'}`}</span></span>
+						<span class="text-lg font-black"><ScoreValue value={total} /><span class="sr-only">{`${total} ${total === 1 ? 'point' : 'points'}`}</span></span>
 					</p>
 					<ul class="mt-1 flex flex-wrap gap-1" aria-label="Members of {groupLabel(group)}">
 						{#each members as player (player.id)}
@@ -131,7 +134,7 @@
 							{groupLabel(group)}
 							{#if group === myGroup}<span class="text-xs font-bold text-teal-deep">(your group)</span>{/if}
 						</h3>
-						<p class="text-sm text-ink-soft"><span class="text-xl font-black text-ink tabular-nums">{total}</span> {total === 1 ? 'pt' : 'pts'}</p>
+						<p class="text-sm text-ink-soft"><ScoreValue value={total} class="text-xl font-black text-ink" /><span class="sr-only">{total}</span> {total === 1 ? 'pt' : 'pts'}</p>
 					</header>
 					<ol class="space-y-1.5" aria-label="Members of {groupLabel(group)}">
 						{#each members as player (player.id)}

@@ -21,6 +21,219 @@
 	--color-ink-soft: #4a6b67;
 }
 
+/*
+ * Motion. Presentational only: short (150–400 ms) micro-animations that fit
+ * inside the game's own reveal windows and never delay input. Only transform
+ * and opacity are animated. Everything is switched off by the
+ * prefers-reduced-motion rule in the base layer.
+ *
+ * "inline" so that per-element variables (--i for staggered lists, the
+ * --confetti-* values) resolve on the element, not on :root.
+ */
+@theme inline {
+	--animate-pop-in: pop-in 320ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+	--animate-fade-in: fade-in 240ms ease-out both;
+	/* Staggered when the element sets --i (0, 1, 2, …); capped at 8 steps. */
+	--animate-fade-up: fade-up 360ms cubic-bezier(0.22, 1, 0.36, 1) calc(min(var(--i, 0), 8) * 55ms) both;
+	--animate-screen-in: fade-up 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+	--animate-turn-in: turn-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+	--animate-ring-pulse: ring-pulse 900ms ease-out 2 both;
+	--animate-score-pop: score-pop 360ms cubic-bezier(0.34, 1.56, 0.64, 1);
+	--animate-float-up: float-up 900ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+	--animate-shake: shake 400ms ease-in-out;
+	--animate-settle: settle 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+	--animate-match-bump: match-bump 520ms cubic-bezier(0.34, 1.56, 0.64, 1);
+	--animate-match-glow: match-glow 900ms ease-out both;
+	--animate-drop-in: drop-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+	--animate-float: float 3.6s ease-in-out infinite;
+	--animate-live-ping: live-ping 2.4s ease-out infinite;
+	--animate-confetti: confetti var(--confetti-duration, 1.8s) cubic-bezier(0.25, 0.6, 0.4, 1) var(--confetti-delay, 0ms) both;
+}
+
+@keyframes pop-in {
+	0% {
+		opacity: 0;
+		transform: scale(0.6);
+	}
+	100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+}
+@keyframes fade-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+@keyframes fade-up {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+@keyframes turn-in {
+	from {
+		opacity: 0;
+		transform: translateY(-6px) scale(0.98);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+@keyframes ring-pulse {
+	0% {
+		opacity: 0;
+		transform: scale(0.98);
+	}
+	40% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+		transform: scale(1.03);
+	}
+}
+@keyframes score-pop {
+	0% {
+		transform: scale(1);
+	}
+	40% {
+		transform: scale(1.35);
+	}
+	100% {
+		transform: scale(1);
+	}
+}
+@keyframes float-up {
+	0% {
+		opacity: 0;
+		transform: translateY(4px) scale(0.8);
+	}
+	20% {
+		opacity: 1;
+		transform: translateY(-2px) scale(1);
+	}
+	100% {
+		opacity: 0;
+		transform: translateY(-22px);
+	}
+}
+@keyframes shake {
+	0%,
+	100% {
+		transform: translateX(0);
+	}
+	20% {
+		transform: translateX(-4px);
+	}
+	40% {
+		transform: translateX(4px);
+	}
+	60% {
+		transform: translateX(-3px);
+	}
+	80% {
+		transform: translateX(2px);
+	}
+}
+@keyframes settle {
+	0% {
+		transform: scale(0.96);
+	}
+	60% {
+		transform: scale(1.02);
+	}
+	100% {
+		transform: scale(1);
+	}
+}
+@keyframes match-bump {
+	0%,
+	100% {
+		transform: scale(1);
+	}
+	45% {
+		transform: scale(1.07);
+	}
+}
+@keyframes match-glow {
+	0% {
+		opacity: 0;
+		transform: scale(0.94);
+	}
+	35% {
+		opacity: 1;
+		transform: scale(1.04);
+	}
+	100% {
+		opacity: 0;
+		transform: scale(1.1);
+	}
+}
+@keyframes drop-in {
+	from {
+		opacity: 0;
+		transform: translateY(-0.4em) scale(0.9);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+@keyframes float {
+	0%,
+	100% {
+		transform: translateY(0);
+	}
+	50% {
+		transform: translateY(-4px);
+	}
+}
+@keyframes live-ping {
+	0% {
+		opacity: 0.55;
+		transform: scale(1);
+	}
+	60%,
+	100% {
+		opacity: 0;
+		transform: scale(2.6);
+	}
+}
+@keyframes confetti {
+	0% {
+		opacity: 0;
+		transform: translate(0, 0) rotate(0deg);
+	}
+	10% {
+		opacity: 1;
+	}
+	75% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+		transform: translate(var(--confetti-dx, 0px), var(--confetti-dy, 220px)) rotate(var(--confetti-rot, 360deg));
+	}
+}
+@keyframes shimmer {
+	0% {
+		transform: translateX(-120%);
+	}
+	30%,
+	100% {
+		transform: translateX(120%);
+	}
+}
+
 @layer base {
 	html {
 		-webkit-text-size-adjust: 100%;
@@ -51,14 +264,16 @@
 		*::after {
 			animation-duration: 0.01ms !important;
 			animation-iteration-count: 1 !important;
+			animation-delay: 0s !important;
 			transition-duration: 0.01ms !important;
+			transition-delay: 0s !important;
 			scroll-behavior: auto !important;
 		}
 	}
 }
 
 @utility btn {
-	@apply inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-2xl px-5 py-3 text-base font-bold transition-colors duration-150 select-none disabled:cursor-not-allowed disabled:opacity-55;
+	@apply inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-2xl px-5 py-3 text-base font-bold transition-[color,background-color,border-color,transform] duration-150 select-none active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-55 disabled:active:scale-100;
 }
 @utility btn-primary {
 	@apply btn bg-teal-deep text-white hover:bg-ink active:bg-ink disabled:hover:bg-teal-deep;
@@ -90,3 +305,35 @@
 @utility safe-bottom {
 	padding-bottom: env(safe-area-inset-bottom);
 }
+
+/* Matchen card flip: a 3D-rotating inner layer with a back and a front face. */
+@utility flip-scene {
+	perspective: 800px;
+}
+@utility flip-inner {
+	transform-style: preserve-3d;
+	transition: transform 360ms cubic-bezier(0.45, 0, 0.2, 1);
+}
+@utility flip-face {
+	-webkit-backface-visibility: hidden;
+	backface-visibility: hidden;
+}
+@utility flip-turned {
+	transform: rotateY(180deg);
+}
+
+/* A soft highlight that sweeps across an element now and then (trophy pills). */
+@utility shimmer {
+	position: relative;
+	overflow: hidden;
+	&::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		background: linear-gradient(110deg, transparent 35%, rgb(255 255 255 / 0.6) 50%, transparent 65%);
+		transform: translateX(-120%);
+		animation: shimmer 4.5s ease-in-out 1.2s infinite;
+	}
+}
+

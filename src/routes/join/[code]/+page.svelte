@@ -115,13 +115,13 @@
 						<div class="grid grid-cols-6 gap-2">
 							{#each AVATARS as option (option)}
 								<label
-									class="grid aspect-square min-h-12 cursor-pointer place-items-center rounded-2xl border-2 text-2xl transition-colors has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-teal-deep sm:text-3xl {avatar ===
+									class="grid aspect-square min-h-12 cursor-pointer place-items-center rounded-2xl border-2 text-2xl transition-[color,background-color,border-color,transform] duration-150 active:scale-95 has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-teal-deep sm:text-3xl {avatar ===
 									option
 										? 'border-teal-deep bg-teal-soft'
 										: 'border-ink/10 bg-surface hover:border-ink/25'}"
 								>
 									<input type="radio" name="avatar" value={option} bind:group={avatar} class="sr-only" />
-									<span aria-hidden="true">{option}</span>
+									<span class="inline-block {avatar === option ? 'animate-score-pop' : ''}" aria-hidden="true">{option}</span>
 									<span class="sr-only">Avatar {option}</span>
 								</label>
 							{/each}
@@ -134,7 +134,7 @@
 						<div class="grid grid-cols-2 gap-2">
 							{#each PROFICIENCY_LEVELS as option (option)}
 								<label
-									class="flex min-h-12 cursor-pointer items-center justify-center rounded-2xl border-2 px-3 text-center font-bold has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-teal-deep {level ===
+									class="flex min-h-12 cursor-pointer items-center justify-center rounded-2xl border-2 px-3 text-center font-bold transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.98] has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-teal-deep {level ===
 									option
 										? 'border-teal-deep bg-teal-soft'
 										: 'border-ink/10 bg-surface hover:border-ink/25'}"

@@ -15,9 +15,9 @@
 	const gamesPlayed = $derived(view.history.length);
 </script>
 
-<div class="mx-auto max-w-xl space-y-4">
+<div class="mx-auto max-w-xl animate-screen-in space-y-4">
 	<section class="card-surface p-5 text-center sm:p-7" aria-labelledby="lobby-heading">
-		{#if me}<p class="text-5xl" aria-hidden="true">{me.avatar}</p>{/if}
+		{#if me}<p class="text-5xl" aria-hidden="true"><span class="inline-block animate-float">{me.avatar}</span></p>{/if}
 		<h1 id="lobby-heading" class="mt-2 text-3xl font-black break-words">{session.name}</h1>
 		<div class="mt-3 flex flex-wrap justify-center gap-2">
 			<GameBadge mode={session.mode} variant={session.variant} pairCount={session.pair_count} groupCount={session.group_count} />

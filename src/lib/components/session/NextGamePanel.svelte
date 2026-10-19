@@ -44,7 +44,7 @@
 	}
 </script>
 
-<form class="card-surface space-y-7 p-5 sm:p-7" onsubmit={submit} aria-labelledby="next-game-heading">
+<form class="card-surface animate-screen-in space-y-7 p-5 sm:p-7" onsubmit={submit} aria-labelledby="next-game-heading">
 	<div>
 		<h2 id="next-game-heading" class="text-xl font-extrabold">{title}</h2>
 		<p class="mt-1 text-sm text-ink-soft">{hint}</p>

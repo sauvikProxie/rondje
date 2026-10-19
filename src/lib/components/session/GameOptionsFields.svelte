@@ -34,7 +34,7 @@
 	<div class="grid gap-3 sm:grid-cols-2">
 		{#each GAME_MODES as option (option)}
 			<label
-				class="flex min-h-12 cursor-pointer gap-3 rounded-2xl border-2 p-4 transition-colors has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-teal-deep {mode ===
+				class="flex min-h-12 cursor-pointer gap-3 rounded-2xl border-2 p-4 transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.99] has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-teal-deep {mode ===
 				option
 					? 'border-teal-deep bg-teal-soft'
 					: 'border-ink/10 bg-surface hover:border-ink/25'}"
@@ -65,7 +65,7 @@
 	<div class="grid gap-3 sm:grid-cols-2">
 		{#each VARIANTS as option (option)}
 			<label
-				class="flex min-h-12 cursor-pointer gap-3 rounded-2xl border-2 p-4 transition-colors has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-teal-deep {variant ===
+				class="flex min-h-12 cursor-pointer gap-3 rounded-2xl border-2 p-4 transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.99] has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-teal-deep {variant ===
 				option
 					? 'border-teal-deep bg-teal-soft'
 					: 'border-ink/10 bg-surface hover:border-ink/25'}"
@@ -91,7 +91,7 @@
 	<div class="grid grid-cols-3 gap-3">
 		{#each PAIR_COUNTS as option (option)}
 			<label
-				class="flex min-h-14 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-teal-deep {pairCount ===
+				class="flex min-h-14 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.98] has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-teal-deep {pairCount ===
 				option
 					? 'border-teal-deep bg-teal-soft'
 					: 'border-ink/10 bg-surface hover:border-ink/25'}"
@@ -110,7 +110,7 @@
 	<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
 		{#each GROUP_COUNTS as option (option)}
 			<label
-				class="flex min-h-12 cursor-pointer items-center justify-center rounded-2xl border-2 px-3 text-center font-bold has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-teal-deep {groupCount ===
+				class="flex min-h-12 cursor-pointer items-center justify-center rounded-2xl border-2 px-3 text-center font-bold transition-[color,background-color,border-color,transform] duration-150 active:scale-[0.98] has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-teal-deep {groupCount ===
 				option
 					? 'border-teal-deep bg-teal-soft'
 					: 'border-ink/10 bg-surface hover:border-ink/25'}"

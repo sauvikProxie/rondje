@@ -28,7 +28,7 @@
 
 <ul class="divide-y-2 divide-ink/5" aria-label="Participants">
 	{#if hostOnline !== undefined}
-		<li class="flex min-h-16 items-center gap-3 py-2.5">
+		<li class="flex min-h-16 animate-fade-in items-center gap-3 py-2.5">
 			<PlayerAvatar avatar="🎙️" online={hostOnline} size="sm" />
 			<div class="min-w-0 flex-1">
 				<p class="font-extrabold">Host</p>
@@ -39,8 +39,9 @@
 	{/if}
 	{#each visible as player (player.id)}
 		{@const isOnline = online.has(player.id)}
-		<li class="flex min-h-16 items-center gap-3 py-2.5 {player.status === 'removed' ? 'opacity-60' : ''}">
-			<PlayerAvatar avatar={player.avatar} online={player.status === 'active' ? isOnline : undefined} size="sm" />
+		<!-- New players ease into the list as they join; their avatar pops in. -->
+		<li class="flex min-h-16 animate-fade-up items-center gap-3 py-2.5 {player.status === 'removed' ? 'opacity-60' : ''}">
+			<span class="inline-flex animate-pop-in [animation-delay:80ms]"><PlayerAvatar avatar={player.avatar} online={player.status === 'active' ? isOnline : undefined} size="sm" /></span>
 			<div class="min-w-0 flex-1">
 				<p class="truncate font-extrabold">
 					{player.nickname}

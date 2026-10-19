@@ -1,7 +1,12 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { markAppReady } from '$lib/client/motion';
 	import '../app.css';
 
 	let { children } = $props();
+
+	// Children mount first, so screens shown on page load don't replay celebrations.
+	onMount(markAppReady);
 </script>
 
 <a

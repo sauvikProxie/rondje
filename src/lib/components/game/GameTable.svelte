@@ -43,7 +43,7 @@
 	});
 </script>
 
-<div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_17rem] lg:items-start">
+<div class="grid animate-screen-in gap-4 lg:grid-cols-[minmax(0,1fr)_17rem] lg:items-start">
 	<div class="min-w-0 space-y-3">
 		<TurnBanner {game} {active} {me} />
 

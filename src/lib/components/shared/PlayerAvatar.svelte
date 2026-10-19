@@ -10,7 +10,7 @@
 </script>
 
 <span
-	class="relative inline-grid shrink-0 place-items-center rounded-full bg-cream {sizes[size]} {active
+	class="relative inline-grid shrink-0 place-items-center rounded-full bg-cream transition-shadow duration-300 {sizes[size]} {active
 		? 'ring-4 ring-saffron'
 		: 'ring-2 ring-ink/10'}"
 	aria-hidden="true"
