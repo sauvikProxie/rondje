@@ -9,6 +9,7 @@
 	import ConnectionPill from '$lib/components/shared/ConnectionPill.svelte';
 	import Logo from '$lib/components/shared/Logo.svelte';
 	import NoticeToast from '$lib/components/shared/NoticeToast.svelte';
+	import ThemeToggle from '$lib/components/shared/ThemeToggle.svelte';
 	import type { SessionView } from '$lib/types/session-view';
 	import RemovedNotice from './RemovedNotice.svelte';
 
@@ -44,6 +45,7 @@
 			<div class="flex min-w-0 items-center gap-2">
 				<p class="hidden truncate text-sm font-bold text-ink-soft sm:block">{view.session.name}</p>
 				<ConnectionPill state={sync.connection} />
+				<ThemeToggle />
 			</div>
 		</header>
 

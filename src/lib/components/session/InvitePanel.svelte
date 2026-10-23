@@ -15,7 +15,7 @@
 		<p class="mt-1 text-sm font-bold text-coral-deep">The game has started; new players can no longer join.</p>
 	{/if}
 	<div class="mt-4 grid items-center gap-5 sm:grid-cols-[auto_1fr]">
-		<div class="mx-auto w-44 rounded-2xl bg-surface p-2 ring-2 ring-ink/10 sm:w-40" role="img" aria-label="QR code for the invitation link">
+		<div class="mx-auto w-44 rounded-2xl bg-white p-2 ring-2 ring-ink/10 sm:w-40" role="img" aria-label="QR code for the invitation link">
 			<!-- QR SVG generated on the server from the invitation link (no user content). -->
 			{@html qrSvg}
 		</div>

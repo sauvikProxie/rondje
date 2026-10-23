@@ -87,8 +87,8 @@
 	<span class="flip-inner absolute inset-0 block {faceUp ? 'flip-turned' : ''}" aria-hidden="true">
 		<!-- Back -->
 		<span
-			class="flip-face absolute inset-0 grid place-items-center rounded-2xl bg-teal-deep text-cream shadow-[inset_0_-4px_0_rgba(0,0,0,0.18)] transition-colors duration-200
-				{interactive ? 'group-hover:bg-ink' : ''}"
+			class="flip-face absolute inset-0 grid place-items-center rounded-2xl bg-teal-solid text-cream-fixed shadow-[inset_0_-4px_0_rgba(0,0,0,0.18)] transition-colors duration-200
+				{interactive ? 'group-hover:bg-ink-solid' : ''}"
 		>
 			<svg class="size-2/5 opacity-70" viewBox="0 0 64 64">
 				<circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" stroke-width="8" />
@@ -119,10 +119,10 @@
 								{justMatched ? 'animate-pop-in [animation-delay:380ms]' : ''}">{matcher.avatar}</span
 						>
 					{:else}
-						<span class="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-teal-deep text-[0.65rem] text-white">✓</span>
+						<span class="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-teal-solid text-[0.65rem] text-white">✓</span>
 					{/if}
 				{:else if front.mismatch}
-					<span class="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-coral-deep text-[0.65rem] text-white">✕</span>
+					<span class="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-coral-solid text-[0.65rem] text-white">✕</span>
 				{/if}
 			{/if}
 		</span>

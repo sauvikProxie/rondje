@@ -19,6 +19,50 @@
 	--color-saffron-soft: #f8ecc9;
 	--color-coral-soft: #fbe2da;
 	--color-ink-soft: #4a6b67;
+
+	/*
+	 * Solid fills that carry light text (buttons, banners, card backs, toasts).
+	 * In light mode they equal teal-deep / coral-deep / ink, but in dark mode those
+	 * become light foreground colours, so fills need their own tokens.
+	 */
+	--color-teal-solid: #1b7a6f;
+	--color-coral-solid: #a63d25;
+	--color-ink-solid: #123f3a;
+
+	/* Theme-independent colours for content on bright fills (saffron pills, card backs). */
+	--color-ink-fixed: #123f3a;
+	--color-cream-fixed: #fdf0d5;
+}
+
+/*
+ * Dark theme. The inline script in app.html sets data-theme on <html> before
+ * first paint (stored choice, else the system preference), so there is no
+ * light flash. Tints such as bg-ink/5 and border-ink/10 follow automatically.
+ */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+:root {
+	color-scheme: light;
+	--card-shadow-line: rgb(18 63 58 / 0.08);
+	--card-shadow-drop: rgb(18 63 58 / 0.18);
+}
+
+:root[data-theme='dark'] {
+	color-scheme: dark;
+	--color-cream: #0d1f1c;
+	--color-surface: #15302c;
+	--color-ink: #eaf4f1;
+	--color-ink-soft: #a3c1bc;
+	--color-teal: #2bb3a3;
+	--color-teal-deep: #5ccfbf;
+	--color-teal-soft: #183f3a;
+	--color-saffron-soft: #3a3320;
+	--color-coral: #ee8468;
+	--color-coral-deep: #ff9b80;
+	--color-coral-soft: #42251f;
+	--color-ink-solid: #2e5752;
+	--card-shadow-line: rgb(0 0 0 / 0.3);
+	--card-shadow-drop: rgb(0 0 0 / 0.5);
 }
 
 /*
@@ -276,19 +320,19 @@
 	@apply inline-flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-2xl px-5 py-3 text-base font-bold transition-[color,background-color,border-color,transform] duration-150 select-none active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-55 disabled:active:scale-100;
 }
 @utility btn-primary {
-	@apply btn bg-teal-deep text-white hover:bg-ink active:bg-ink disabled:hover:bg-teal-deep;
+	@apply btn bg-teal-solid text-white hover:bg-ink-solid active:bg-ink-solid disabled:hover:bg-teal-solid;
 }
 @utility btn-secondary {
-	@apply btn bg-saffron text-ink hover:bg-[#dfb44f] active:bg-[#d4a83f] disabled:hover:bg-saffron;
+	@apply btn bg-saffron text-ink-fixed hover:bg-[#dfb44f] active:bg-[#d4a83f] disabled:hover:bg-saffron;
 }
 @utility btn-ghost {
 	@apply btn border-2 border-ink/15 bg-surface text-ink hover:border-teal-deep hover:bg-teal-soft;
 }
 @utility btn-danger {
-	@apply btn bg-coral-deep text-white hover:bg-[#8a3018] disabled:hover:bg-coral-deep;
+	@apply btn bg-coral-solid text-white hover:bg-[#8a3018] disabled:hover:bg-coral-solid;
 }
 @utility card-surface {
-	@apply rounded-3xl bg-surface shadow-[0_1px_0_rgba(18,63,58,0.08),0_8px_24px_-12px_rgba(18,63,58,0.18)];
+	@apply rounded-3xl bg-surface shadow-[0_1px_0_var(--card-shadow-line),0_8px_24px_-12px_var(--card-shadow-drop)];
 }
 @utility field-label {
 	@apply mb-1.5 block text-sm font-bold text-ink;

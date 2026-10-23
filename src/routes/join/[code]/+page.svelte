@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import Alert from '$lib/components/shared/Alert.svelte';
 	import Logo from '$lib/components/shared/Logo.svelte';
+	import ThemeToggle from '$lib/components/shared/ThemeToggle.svelte';
 	import GameBadge from '$lib/components/shared/GameBadge.svelte';
 	import { errorMessage } from '$lib/errors';
 	import { AVATARS, LEVEL_LABELS, NICKNAME_MAX_LENGTH, PROFICIENCY_LEVELS } from '$lib/game/constants';
@@ -37,7 +38,7 @@
 </svelte:head>
 
 <div class="mx-auto flex min-h-dvh max-w-lg flex-col px-4 py-5">
-	<header class="mb-6"><Logo /></header>
+	<header class="mb-6 flex items-center justify-between gap-3"><Logo /><ThemeToggle /></header>
 
 	<main id="main" class="flex-1">
 		{#if data.state.kind === 'error'}

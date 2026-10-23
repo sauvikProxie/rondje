@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import Logo from '$lib/components/shared/Logo.svelte';
+	import ThemeToggle from '$lib/components/shared/ThemeToggle.svelte';
 
 	let { email }: { email: string | null } = $props();
 
@@ -18,7 +19,10 @@
 	aria-label="Host navigation"
 	class="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r-2 border-ink/5 bg-surface/70 px-4 py-6 lg:flex"
 >
-	<Logo />
+	<div class="flex items-center justify-between gap-2">
+		<Logo />
+		<ThemeToggle />
+	</div>
 	<ul class="mt-8 space-y-1">
 		{#each links as link (link.href)}
 			<li>
@@ -48,9 +52,12 @@
 <!-- Mobile: compact top bar + bottom navigation -->
 <header class="flex items-center justify-between border-b-2 border-ink/5 bg-surface/80 px-4 py-3 lg:hidden">
 	<Logo size="sm" />
-	<form method="POST" action="/auth/logout">
-		<button class="min-h-11 rounded-xl px-3 text-sm font-bold text-teal-deep">Sign out</button>
-	</form>
+	<div class="flex items-center gap-1">
+		<ThemeToggle />
+		<form method="POST" action="/auth/logout">
+			<button class="min-h-11 rounded-xl px-3 text-sm font-bold text-teal-deep">Sign out</button>
+		</form>
+	</div>
 </header>
 <nav
 	aria-label="Host navigation"

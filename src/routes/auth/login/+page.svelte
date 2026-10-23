@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import Alert from '$lib/components/shared/Alert.svelte';
 	import Logo from '$lib/components/shared/Logo.svelte';
+	import ThemeToggle from '$lib/components/shared/ThemeToggle.svelte';
 
 	let { data, form } = $props();
 
@@ -23,7 +24,7 @@
 </svelte:head>
 
 <div class="mx-auto flex min-h-dvh max-w-md flex-col px-4 py-6">
-	<header class="mb-8"><Logo /></header>
+	<header class="mb-8 flex items-center justify-between gap-3"><Logo /><ThemeToggle /></header>
 
 	<main id="main" class="card-surface p-5 sm:p-8">
 		<h1 class="text-3xl font-black">{mode === 'signin' ? 'Host sign in' : 'Create a host account'}</h1>

@@ -54,7 +54,7 @@
 
 <section class="mx-auto max-w-2xl" aria-labelledby="results-heading">
 	<div class="card-surface overflow-hidden">
-		<div class="relative overflow-hidden bg-teal-deep px-5 py-7 text-center text-white sm:px-8">
+		<div class="relative overflow-hidden bg-teal-solid px-5 py-7 text-center text-white sm:px-8">
 			{#if celebration}<Confetti count={celebration} distance={260} />{/if}
 			<p class="relative z-10 text-sm font-bold tracking-wide text-white/85 uppercase">
 				{session.name} · {game && game.number > 1 ? `Game ${game.number} · ` : ''}{gameLabel}
@@ -66,13 +66,13 @@
 			{#if grouped && winningGroups.length > 0}
 				<p class="relative z-10 mt-4 flex flex-wrap justify-center gap-2" aria-label="Winning groups">
 					{#each winningGroups as group (group)}
-						<span class="pill shimmer animate-pop-in bg-saffron px-3 py-1 text-sm text-ink [animation-delay:260ms]"><span aria-hidden="true">🏆</span> {groupLabel(group)}</span>
+						<span class="pill shimmer animate-pop-in bg-saffron px-3 py-1 text-sm text-ink-fixed [animation-delay:260ms]"><span aria-hidden="true">🏆</span> {groupLabel(group)}</span>
 					{/each}
 				</p>
 			{:else if !grouped && winners.length > 0}
 				<p class="relative z-10 mt-4 flex flex-wrap justify-center gap-2" aria-label="Winners">
 					{#each winners as winner (winner.id)}
-						<span class="pill shimmer animate-pop-in bg-saffron px-3 py-1 text-sm text-ink [animation-delay:260ms]"><span aria-hidden="true">🏆 {winner.avatar}</span> {winner.nickname}</span>
+						<span class="pill shimmer animate-pop-in bg-saffron px-3 py-1 text-sm text-ink-fixed [animation-delay:260ms]"><span aria-hidden="true">🏆 {winner.avatar}</span> {winner.nickname}</span>
 					{/each}
 				</p>
 			{/if}
@@ -108,7 +108,7 @@
 									</li>
 								{/each}
 							</ul>
-							{#if standing.isWinner}<p class="mt-2"><span class="pill shimmer bg-saffron text-ink">🏆 Winner</span></p>{/if}
+							{#if standing.isWinner}<p class="mt-2"><span class="pill shimmer bg-saffron text-ink-fixed">🏆 Winner</span></p>{/if}
 						</li>
 					{/each}
 				</ol>

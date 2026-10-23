@@ -19,7 +19,7 @@
 {#key game.active_player_id}
 	<div
 		class="relative flex animate-turn-in items-center gap-3 rounded-3xl p-3 sm:p-4 {myTurn
-			? 'bg-teal-deep text-white'
+			? 'bg-teal-solid text-white'
 			: 'bg-surface text-ink ring-2 ring-ink/5'}"
 	>
 		{#if myTurn}

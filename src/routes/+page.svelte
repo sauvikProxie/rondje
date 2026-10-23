@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import Logo from '$lib/components/shared/Logo.svelte';
+	import ThemeToggle from '$lib/components/shared/ThemeToggle.svelte';
 	import { MODE_INFO, VARIANTS, VARIANT_INFO } from '$lib/game/constants';
 
 	let { data, form } = $props();
@@ -20,9 +21,12 @@
 <div class="mx-auto flex min-h-dvh max-w-5xl flex-col px-4 sm:px-6">
 	<header class="flex items-center justify-between gap-3 py-4">
 		<Logo />
-		<a href="/dashboard" class="btn-ghost min-h-11 px-4 text-sm">
-			{data.viewer && !data.viewer.isAnonymous ? 'My sessions' : 'Host sign in'}
-		</a>
+		<div class="flex items-center gap-2">
+			<ThemeToggle />
+			<a href="/dashboard" class="btn-ghost min-h-11 px-4 text-sm">
+				{data.viewer && !data.viewer.isAnonymous ? 'My sessions' : 'Host sign in'}
+			</a>
+		</div>
 	</header>
 
 	<main id="main" class="flex-1 pb-12">
